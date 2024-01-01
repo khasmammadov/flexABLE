@@ -11,10 +11,11 @@ from .MarketResults import MarketResults
 
 
 class EOM():
-    def __init__(self, name, demand = None, CBtrades = None, world = None):
+    def __init__(self, name, demand = None, CBtrades = None,world = None):
         self.name = name
         self.world = world
         self.snapshots = self.world.snapshots
+        # self.industrial_demand=industrial_demand
         
         if demand == None:
             self.demand = {t:0 for t in self.snapshots}

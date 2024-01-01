@@ -7,6 +7,7 @@ Created on Sun Apr  19 15:58:21 2020
 from . import powerplant
 from . import vrepowerplants
 from . import storage
+from . import electrolyzer
 
 class Agent():
     """
@@ -19,6 +20,7 @@ class Agent():
         self.name = name
         self.powerplants = {}
         self.storages = {}
+        self.electrolyzers = {}
         self.world = world
         
         
@@ -45,8 +47,16 @@ class Agent():
                                               **kwargs)
         
         self.world.storages.append(self.storages[name])
+    
+    # addElectrolyzer method
+    def addElectrolyzer(self, name, **kwargs):
+        self.electrolyzers[name] = electrolyzer.Electrolyzer(name = name, 
+                                              world=self.world, 
+                                              **kwargs)
         
-        
+        self.world.electrolyzers.append(self.electrolyzers[name])
+    
+    
     def calculateBid(self, t, market = "EOM"):
         bids = []
         
@@ -62,6 +72,8 @@ class Agent():
         for unit in self.storages.values():
             bids.extend(unit.requestBid(t, market))
             
+        for unit in self.electrolyzers.values():
+            bids.extend(unit.requestBid(t, market))
         return bids
     
     

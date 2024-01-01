@@ -25,7 +25,7 @@ class VREPowerplant():
                  node = 'Bus_DE',
                  world = None,
                  FeedInTimeseries = 0):
-        
+
         # bids status parameters
         self.dictFeedIn = {n:m for n,m in zip(self.world.snapshots,FeedInTimeseries)}
         
@@ -40,8 +40,12 @@ class VREPowerplant():
         self.sentBids=[]
         
         
+        #step method updates the available capacity based on confirmed bid amounts and 
+        # categorizes these updates into different dictionaries based on whether the bid 
+        # is a must-run or a flexible bid. 
     def step(self):
-        self.dictCapacity[self.world.currstep] = 0
+        self.dictCapacity[self.world.currstep] = 0  #It sets the value of 0 at the current time step in 
+        #the dictCapacity dictionary. It appears to reset the available capacity to zero at the beginning of each time step.
         
         for bid in self.sentBids:
             self.dictCapacity[self.world.currstep] += bid.confirmedAmount

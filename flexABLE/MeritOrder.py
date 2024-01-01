@@ -46,7 +46,7 @@ class MeritOrder():
         contractedSupply = renewableSupply
         mcp = 0
         
-        if sum(powerplants.maxPower) < demand:
+        if (sum(powerplants.maxPower) + renewableSupply) < demand:
             # print('Contracted energy was not enough!')
             mcp = 1000
         elif renewableSupply >= demand:

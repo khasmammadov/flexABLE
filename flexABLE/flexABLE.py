@@ -61,11 +61,13 @@ class World():
     """
     This is the main container
     """
-    def __init__(self, snapshots, simulationID = None, databaseName = 'flexABLE', startingDate = '2018-01-01T00:00:00', writeResultsToDB = False):
+    def __init__(self, snapshots, simulationID = None, databaseName = 'flexABLE', industrial_demand=None, startingDate = '2018-01-01T00:00:00', writeResultsToDB = False):
         self.simulationID = simulationID
         self.powerplants = []
         self.storages = []
+        self.electrolyzers = []
         self.agents = {}
+        self.industrial_demand = []
         self.markets = {"EOM":{},
                         "CRM":{}}
         
@@ -88,6 +90,8 @@ class World():
         
         self.dictPFC = [0]*snapshots # This is an artifact and should be removed
         self.PFC = [0]*snapshots
+        # self.weather_CF = [0]*snapshots
+
         self.EOMResult = [0]*snapshots
         self.IEDPrice = [2999.9]*snapshots
         
@@ -104,9 +108,9 @@ class World():
         self.agents[name] = agent.Agent(name, snapshots = self.snapshots, world = self)
         
         
-    def addMarket(self, name, marketType, demand = None, CBtrades = None, HLP_DH = None, annualDemand = None):
+    def addMarket(self, name, marketType, demand = None, CBtrades = None,  HLP_DH = None, annualDemand = None):
         if marketType == "EOM":
-            self.markets["EOM"][name] = EOM.EOM(name, demand = demand, CBtrades = CBtrades, world = self)
+            self.markets["EOM"][name] = EOM.EOM(name, demand = demand, CBtrades = CBtrades,  world = self)
             
         if marketType == "DHM":
             self.markets["DHM"] = DHM.DHM(name, HLP_DH = HLP_DH, annualDemand = annualDemand, world = self)
@@ -133,8 +137,9 @@ class World():
             for storage in self.storages:
                 storage.step()
                 
+            for electrolyzer in self.electrolyzers: 
+                electrolyzer.step()
             self.currstep +=1
-            
         else:
             logger.info("Reached simulation end")
             
@@ -229,6 +234,22 @@ class World():
                                                                                         'Technology':powerplant.technology})
             
             
+            #write electrolyzer capacities
+            for powerplant in self.electrolyzers:
+                tempDF = pd.DataFrame(powerplant.dictCapacity, index=['Power'].drop([-1])).T.set_index(pd.date_range(self.startingDate,
+                                                                                                          periods = len(self.snapshots),
+                                                                                                          freq = '15T')).astype('float64')
+
+                self.ResultsWriter.writeDataFrame(tempDF.clip(upper = 0), 'Power', tags = {'simulationID':self.simulationID,
+                                                                                           'UnitName':powerplant.name+'_charge',
+                                                                                           'direction':'charge',
+                                                                                           'Technology':powerplant.technology})
+                
+                self.ResultsWriter.writeDataFrame(tempDF.clip(lower=0),'Power', tags = {'simulationID':self.simulationID,
+                                                                                        'UnitName':powerplant.name+'_discharge',
+                                                                                        'direction':'discharge',
+                                                                                        'Technology':powerplant.technology})
+            
             finished = datetime.now()
             logger.info('Writing results into database finished at: {}'.format(finished))
             logger.info('Saving into database time: {}'.format(finished - start))
@@ -241,6 +262,8 @@ class World():
                 os.makedirs(directory)
                 os.makedirs(directory+'/PP_capacities')
                 os.makedirs(directory+'/STO_capacities')
+                # os.makedirs(directory+'/Elec_capacities')
+
                 
             # writing EOM market prices as CSV
             tempDF = pd.DataFrame(self.dictPFC,
@@ -266,9 +289,18 @@ class World():
                                                                                                           freq = '15T')).astype('float64')
                 
                 tempDF.to_csv(directory + 'STO_capacities/{}_Capacity.csv'.format(powerplant.name))
+             
+            #write electrolyzer capacities as CSV
+            for powerplant in self.electrolyzers:
+                tempDF = pd.DataFrame(powerplant.dictCapacity, index=['Power']).T
+                tempDF = tempDF.drop([-1], axis = 0).set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
                 
+                tempDF.to_csv(directory + '{}_Capacity.csv'.format(powerplant.name))
+            
             logger.info('Saving results complete')
             
+            for powerplant in self.powerplants:
+                tempDF.to_csv(directory + 'PP_capacities/{}_Capacity.csv'.format(powerplant.name))
             
         logger.info("#########################")
         
@@ -276,15 +308,15 @@ class World():
     def loadScenario(self,
                      scenario = "Default",
                      importStorages = False,
+                     importElectrolyzer = False,
                      importCRM = True,
                      importDHM = True,
                      importCBT = True,
                      checkAvailability = False,
                      meritOrder = True,
                      startingPoint = 0):
-    
-        self.scenario = scenario
         
+        self.scenario = scenario
         if self.simulationID == None:
             self.simulationID = '{}{}{}{}{}{}'.format(scenario,
                                                         '_Sto' if importStorages else '',
@@ -312,8 +344,6 @@ class World():
         self.emissionFactors = dict(emissionData['emissions'])
         
         logger.info("Fuel data loaded.")
-        
-        
         # =====================================================================
         # Create agents and load power plants    
         # =====================================================================
@@ -368,7 +398,29 @@ class World():
                 self.agents[data['company']].addStorage(storage, **dict(data))
     
         
-    
+        # =====================================================================
+        # Adding Electrolyzer     
+        # =====================================================================
+        if importElectrolyzer: 
+            electrolyzerList = pd.read_csv('input/{}/electrolyzer_param.csv'.format(scenario),
+                                      index_col = 0,
+                                      # encoding = "Latin-1"
+                                      )
+            industrial_demand = pd.read_csv('input/{}/industrial_demand.csv'.format(scenario),
+                                nrows = len(self.snapshots) + startingPoint,
+                                index_col = 0)
+            industrial_demand.drop(industrial_demand.index[0:startingPoint], inplace = True)
+            industrial_demand.reset_index(drop = True, inplace = True)
+            self.industrial_demand = industrial_demand
+        
+            for _ in electrolyzerList.company.unique():
+                if _ not in self.agents:
+                    self.addAgent(_)
+                    
+            for electrolyzer, data in electrolyzerList.iterrows():
+                self.agents[data['company']].addElectrolyzer(electrolyzer, **dict(data))
+            
+
         # =====================================================================
         # Load renewable power generation  
         # =====================================================================
@@ -399,6 +451,7 @@ class World():
         demand.drop(demand.index[0:startingPoint], inplace = True)
         demand.reset_index(drop = True, inplace = True)
         
+
         if importCBT:
             CBT = pd.read_csv('input/{}/CBT_DE.csv'.format(scenario),
                               nrows = len(self.snapshots) + startingPoint,
@@ -467,7 +520,10 @@ class World():
                                                self.snapshots)
             self.dictPFC = meritOrder.PFC()
             self.PFC = self.dictPFC.copy()
-            
+            PFC_export = list([round(p, 2) for p in self.PFC])
+            data = {'PFC': PFC_export}
+            df = pd.DataFrame(data)
+            df.to_csv('output/PFC_export.csv', index=False)
             logger.info("Merit Order calculated.")
             
             
@@ -477,6 +533,7 @@ if __name__ == "__main__":
     
     
     importStorages = True
+    importElectrolyzer = True
     importCRM = True
     importDHM = True
     importCBT = True
@@ -500,6 +557,7 @@ if __name__ == "__main__":
         example.loadScenario(scenario = '{}'.format(year),
                              checkAvailability = checkAvailability,
                              importStorages = importStorages,
+                             importElectrolyzer = importElectrolyzer,
                              importCRM = importCRM,
                              importCBT = importCBT,
                              meritOrder = meritOrder)
