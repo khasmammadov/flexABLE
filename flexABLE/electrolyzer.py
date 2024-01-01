@@ -159,3 +159,5 @@ class Electrolyzer():
             bidQuantity_demand = optimalBidAmount_all[t]
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand)
         return bidsEOM
+    
+    #testing github
