@@ -56,8 +56,6 @@ class Electrolyzer():
         bids = []
         if market == "EOM":
             bids.extend(self.calculateBidEOM(t))
-        # elif market == "negCRMDemand":
-        #     bids.extend(self.calculatingBids_CRM_neg(t))
         return bids
 
     def collectBidsEOM(self, t, bidsEOM, bidQuantity_demand):
@@ -82,11 +80,12 @@ class Electrolyzer():
             #1 regular production means, energy purchase should cover production demand at each timestep
             #2 flexible production means the the production and respective energy purchase can be scheduled for the cheapest electricity time
             production_mode = input("Choose optimization mode, 1 for regular production 2 for flexible production: ") 
-            #followings are to avoid pyomo problems, the inputs form flexable saved to respective variables to be used within optimization cycle            
+            foresight = int(input("Please input optimization interval in hours: "))
 
+            #followings are to avoid pyomo problems, the inputs form flexable saved to respective variables to be used within optimization cycle            
             industry_demand = list(self.world.industrial_demand["industry"])
             price = list([round(p, 2) for p in self.world.PFC])
-            foresight = int(24/0.25) #24 hours, optimization timeframe
+            foresight = int(foresight/0.25) # convert to quarters
             
             # # Calculate the maxSOC - highest daily or weekly (within selected simulation timeframe) total demand value in demand
             interval_count = len(price) // foresight
@@ -159,5 +158,3 @@ class Electrolyzer():
             bidQuantity_demand = optimalBidAmount_all[t]
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand)
         return bidsEOM
-    
-    #testing github

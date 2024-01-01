@@ -399,7 +399,7 @@ class World():
     
         
         # =====================================================================
-        # Adding Electrolyzer     
+        # Adding Electrolyzer parameters and industrial H2 demand
         # =====================================================================
         if importElectrolyzer: 
             electrolyzerList = pd.read_csv('input/{}/electrolyzer_param.csv'.format(scenario),
@@ -420,6 +420,7 @@ class World():
             for electrolyzer, data in electrolyzerList.iterrows():
                 self.agents[data['company']].addElectrolyzer(electrolyzer, **dict(data))
             
+            logger.info("Industrial hydrogen demand loaded.")
 
         # =====================================================================
         # Load renewable power generation  
