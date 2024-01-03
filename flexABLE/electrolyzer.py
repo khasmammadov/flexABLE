@@ -39,36 +39,37 @@ class Electrolyzer():
         
         # Unit status parameters
         self.sentBids = []
-
-# manages the available capacity, energy storage (SOC), energy cost, and tracks the success of the market. 
+        #For the production of 1kg of hydrogen, about 9 kg of water and 60kWh of electricity are consumed(Rievaj, V., Gaňa, J., & Synák, F. (2019). Is hydrogen the fuel of the future?)
+    # manages the available capacity, energy storage (SOC), energy cost, and tracks the success of the market. 
     def step(self): 
         self.dictCapacity[self.world.currstep] = 0 #It initializes the available capacity at the current time step to zero.
         for bid in self.sentBids: 
             if 'demandEOM' in bid.ID: #If the bid's ID contains the substring 'demandEOM', it increases the available capacity at the current time step
                 self.dictCapacity[self.world.currstep] = (-bid.amount) #since demand values are recorded as negative in simulation, addition is done through subtraction          
 
-#clarify
+    #clarify
     def feedback(self, bid):
         self.sentBids.append(bid)
         
-# generate and return a list of bids based on the specified market type ("EOM," or "negCRMDemand") and the current time step t
+    # generate and return a list of bids 
     def requestBid(self, t, market="EOM"):
         bids = []
         if market == "EOM":
             bids.extend(self.calculateBidEOM(t))
         return bids
 
+    #this function is for collecting optimized bid amounts for EOM market
     def collectBidsEOM(self, t, bidsEOM, bidQuantity_demand):
             bidsEOM.append(Bid(issuer = self,
                                 ID = "{}_demandEOM".format(self.name),
-                                price = self.world.PFC[t],
+                                price = self.world.PFC[t], #offered price is PFC 
                                 amount = bidQuantity_demand,
                                 status = "Sent",
                                 bidType = "Demand",
                                 node = self.node))
             return bidsEOM
 
-# calculation EOM bid
+    # calculation EOM bid
     def calculateBidEOM(self, t):
         bidsEOM = []
         if os.path.exists('output/optimizedBidAmount.csv'):
@@ -79,22 +80,42 @@ class Electrolyzer():
             #two different schenarios based on user input are possible
             #1 regular production means, energy purchase should cover production demand at each timestep
             #2 flexible production means the the production and respective energy purchase can be scheduled for the cheapest electricity time
-            production_mode = input("Choose optimization mode, 1 for regular production 2 for flexible production: ") 
-            foresight = int(input("Please input optimization interval in hours: "))
-
-            #followings are to avoid pyomo problems, the inputs form flexable saved to respective variables to be used within optimization cycle            
-            industry_demand = list(self.world.industrial_demand["industry"])
-            price = list([round(p, 2) for p in self.world.PFC])
-            foresight = int(foresight/0.25) # convert to quarters
             
-            # # Calculate the maxSOC - highest daily or weekly (within selected simulation timeframe) total demand value in demand
-            interval_count = len(price) // foresight
-            interval_sums=[] 
-            for interval in range(interval_count):
-                start_idx = interval * foresight #start point for time interval
-                end_idx = (interval + 1) * foresight #start point for time interval
-                interval_sums.append(sum(industry_demand[start_idx:end_idx]))
-            maxSOC = max(interval_sums)
+            #TODO: set up electrolyzer parameters here
+            
+            #set up user input variables
+            simulationYear = 2016
+            lastMonth = 1 #input("Please input simulation end month: ") #will get from scenarios 
+            lastDay = 28 #input("Please input simulation end day: ") #will get from scenarios 
+            production_mode = '2' #input("Choose optimization mode, 1 for regular production 2 for flexible production: ")
+            optTimeframe = 'week' #input("Choose optimization timefrme, day or week : ")
+            
+            #setup optimization input values
+            industrialDemandH2 = self.world.industrial_demand
+            PFC = [round(p, 2) for p in self.world.PFC]
+            PFC = pd.DataFrame(PFC, columns=['PFC'])
+            industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')
+            PFC['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')
+            
+            # Calculate the maxSOC - Max SOC represents calculated  cumulative max total weekly or daily demand
+            demandSum = [] #weekly or daily demand sum
+            if optTimeframe == "week":
+                # Use isocalendar to get the week number
+                industrialDemandH2['Week'] = industrialDemandH2['Timestamp'].dt.isocalendar().week
+                unique_weeks = industrialDemandH2['Week'].unique()
+                for week in unique_weeks:
+                    weeklyIntervalDemand = industrialDemandH2[industrialDemandH2['Week'] == week]
+                    weekly_sum = sum(weeklyIntervalDemand['industry'])
+                    demandSum.append(weekly_sum)
+            elif optTimeframe == "day":
+                # Use dt.date to get the date
+                industrialDemandH2['Date'] = industrialDemandH2['Timestamp'].dt.date
+                unique_days = industrialDemandH2['Date'].unique()
+                for day in unique_days:
+                    dailyIntervalDemand = industrialDemandH2[industrialDemandH2['Date'] == day]
+                    daily_sum = sum(dailyIntervalDemand['industry'])
+                    demandSum.append(daily_sum)        
+            maxSOC = max(demandSum)
 
             # Defining optimization function       
             def  optimizeH2Prod(price, industry_demand, production_mode):
@@ -108,14 +129,16 @@ class Electrolyzer():
                 # Define the objective function - minimize cost sum within selected timeframe
                 model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity[i] for i in model.i), sense=pyomo.minimize)
                 
-                # Define SOC constraints
+                # Define SOC constraints based on selected production mode
                 if production_mode == '1': #regular
+                    print('INFO: Regular production mode is selected')
                     model.currentSOC = pyomo.Constraint(model.i, rule=lambda model, i:
                                                         model.SOC[i] == model.SOC[i - 1] + model.bidQuantity[i] - industry_demand[i]
                                                         if i > 0 else model.SOC[i] == model.bidQuantity[i] - industry_demand[i])   #for initial timestep at each optimization cycle
                     model.maxSOC = pyomo.Constraint(model.i, rule=lambda model, i: model.SOC[i] <= maxSOC)
                 
                 elif production_mode == '2': #flexible
+                    print('INFO: Flexible production mode is selected')
                     model.currentSOC = pyomo.Constraint(model.i, rule=lambda model, i:
                                                         model.SOC[i] == model.SOC[i - 1] + model.bidQuantity[i] - industry_demand[i]
                                                         if i > 0 else model.SOC[0] >= industry_demand[0])   #for initial timestep at each optimization cycle
@@ -130,27 +153,48 @@ class Electrolyzer():
                 # Solve the optimization problem
                 opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
                 result = opt.solve(model)
-                print(result.solver.status)
-                print(result.solver.termination_condition)
+                print('INFO: Solver status:', result.solver.status)
+                print('INFO: Results: ', result.solver.termination_condition)
 
                 # Retrieve the optimal values
                 optimalBidAmount = [model.bidQuantity[i].value for i in model.i]
                 return optimalBidAmount
-            
+
             optimalBidAmount_all = [] #optimization reults for all optimized days
-            # price_all = []
-            for interval in range(interval_count):
-                start_idx = interval * foresight #start point for time interval
-                end_idx = (interval + 1) * foresight #start point for time interval
-                interval_industrial_demand = industry_demand[start_idx:end_idx]
-                interval_PFC = price[start_idx:end_idx] #setting intervals for price
-
-                # Perform optimization for the current interval
-                optimalBidAmount = optimizeH2Prod(price=interval_PFC, industry_demand=interval_industrial_demand, production_mode = production_mode)
-                optimalBidAmount_all.extend(optimalBidAmount)
-
+            #setting optimization modes and calling optimization function
+            if optTimeframe == "week":
+                print('INFO: Weekly optimization is being performed')
+                # find weeks from timestamp
+                industrialDemandH2['Week'] = industrialDemandH2['Timestamp'].dt.isocalendar().week
+                PFC['Week'] = PFC['Timestamp'].dt.isocalendar().week
+                unique_weeks = industrialDemandH2['Week'].unique()
+                for week in unique_weeks:
+                    # Extract weekly data for the current week
+                    weeklyIntervalDemand = industrialDemandH2[industrialDemandH2['Week'] == week]
+                    weeklyIntervalDemand = list(weeklyIntervalDemand['industry'])
+                    weeklyIntervalPFC = PFC[PFC['Week'] == week]
+                    weeklyIntervalPFC = list(weeklyIntervalPFC['PFC'])
+                    #Perform optimization for each week
+                    optimalBidamount = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, production_mode=production_mode)
+                    optimalBidAmount_all.extend(optimalBidamount)
+            elif optTimeframe == "day":
+                print('INFO: Daily optimization is being performed')
+                # find days from timestamp
+                industrialDemandH2['Date'] = industrialDemandH2['Timestamp'].dt.date
+                PFC['Date'] = PFC['Timestamp'].dt.date
+                unique_days = industrialDemandH2['Date'].unique()
+                for day in unique_days:
+                    # Extract data for the current day
+                    dailyIntervalDemand = industrialDemandH2[industrialDemandH2['Date'] == day]
+                    dailyIntervalDemand = list(dailyIntervalDemand['industry'])
+                    dailyIntervalPFC = PFC[PFC['Date'] == day]
+                    dailyIntervalPFC = list(dailyIntervalPFC['PFC'])
+                    #Perform optimization for each day
+                    optimalBidamount = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand, production_mode=production_mode)
+                    optimalBidAmount_all.extend(optimalBidamount)
+            
             #exporting optimization results, happens one time then code uses exported csv file for the rest of the simulation
-            data = {'bidQuantity': optimalBidAmount_all}
+            data = {'timestamp': industrialDemandH2['Timestamp'], 'bidQuantity': optimalBidAmount_all }
             df = pd.DataFrame(data)
             df.to_csv('output/optimizedBidAmount.csv', index=False)
             

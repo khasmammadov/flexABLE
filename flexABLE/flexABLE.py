@@ -422,6 +422,7 @@ class World():
             
             logger.info("Industrial hydrogen demand loaded.")
 
+
         # =====================================================================
         # Load renewable power generation  
         # =====================================================================
