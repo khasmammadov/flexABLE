@@ -14,8 +14,8 @@ industrialDemandH2 = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Elec
 PFC = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Electrolyzer market participation/flexABLE_w_electrolyzer/input/2016/PFC_run1.csv')
 
 # Convert DataFrame columns to lists 
-# price = PFC['price'].tolist()
-# industry_demand = industrialDemandH2['industry'].tolist()
+price = PFC['price'].tolist()
+industry_demand = industrialDemandH2['industry'].tolist()
 
 #specify optimization function
 def optimizeH2Prod(price, industry_demand, mode):
@@ -33,7 +33,6 @@ def optimizeH2Prod(price, industry_demand, mode):
     if mode == '1':
         model.currentSOC = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.SOC[i] == model.SOC[i - 1] + model.bidQuantity[i] - industry_demand[i]
-        
                                             if i > 0 else model.SOC[i] == model.bidQuantity[i] - industry_demand[i])   #for initial timestep at each optimization cycle
         model.maxSOC = pyomo.Constraint(model.i, rule=lambda model, i: model.SOC[i] <= maxSOC)
     elif mode == '2':
@@ -41,6 +40,7 @@ def optimizeH2Prod(price, industry_demand, mode):
                                             model.SOC[i] == model.SOC[i - 1] + model.bidQuantity[i] - industry_demand[i]
                                             if i > 0 else model.SOC[0] >= industry_demand[0])   #for initial timestep at each optimization cycle
         model.totalDemand = pyomo.Constraint(expr=sum(model.bidQuantity[i] for i in model.i) == sum(industry_demand[i] for i in model.i)) #clarify unit, power/energy conversation
+        # model.maxSOC = pyomo.Constraint(model.i, rule=lambda model, i: model.SOC[i] <= maxSOC)
 
     # Demand should be covered at each step 
     model.demand_i = pyomo.Constraint(model.i, rule=lambda model, i: model.SOC[i] >= industry_demand[i])
@@ -62,8 +62,8 @@ def optimizeH2Prod(price, industry_demand, mode):
 
 #set up user input variables
 desired_year = 2016 #will get from scenarios 
-mode = input("Choose optimization mode, 1 for regular production 2 for flexible production: ")
-optTimeframe = input("Choose optimization timefrme, day or week : ")
+mode = '1' #input("Choose optimization mode, 1 for regular production 2 for flexible production: ")
+optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
 
 #adding timestamp to input data
 industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'12/31/{desired_year} 23:45', freq='15T')

@@ -402,7 +402,7 @@ class World():
         # Adding Electrolyzer parameters and industrial H2 demand
         # =====================================================================
         if importElectrolyzer: 
-            electrolyzerList = pd.read_csv('input/{}/electrolyzer_param.csv'.format(scenario),
+            electrolyzerList = pd.read_csv('input/{}/electrolyzers.csv'.format(scenario),
                                       index_col = 0,
                                       # encoding = "Latin-1"
                                       )

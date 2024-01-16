@@ -1,0 +1,4 @@
+﻿name,technology,minPower,maxPower,effElec,effStrg,specEnerCons,pressElec,presStorage,maxSOC,minDowntime,company
+Elec_x,PEM,10,100,0.7,0.97,0.005,30,700,500,0.5,Refining
+Elec_y,AEL,10,100,0.7,0.97,0.005,30,700,500,0.5,Steel
+Elec_z,SOEL,10,100,0.7,0.97,0.005,30,700,500,0.5,Ammonium
