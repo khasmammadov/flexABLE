@@ -141,15 +141,6 @@ class Electrolyzer():
                 # Define the objective function - minimize cost sum within selected timeframe
                 model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity[i] for i in model.i), sense=pyomo.minimize)
 
-                # # Define the constraint for shutdown and start-up of the electrolyzer
-                # model.currentStatus = pyomo.Constraint(model.i, rule=lambda model, i:
-                #                                             model.currentStatus[i] == 0 if (model.bidQuantity[i] == 0 or abs(model.bidQuantity[i]) < self.minPower) 
-                #                                            else model.currentStatus[i] == 1 elif abs(model.bidQuantity[i]) >= self.minPower and model.currentDowntime[i] >= self.minDowntime) 
-                                
-                # model.currentDowntime = pyomo.Constraint(model.i, rule=lambda model, i:
-                #                                             model.currentDowntime[i] == model.currentDowntime[i-1] + 1 if (model.currentStatus[i] == 0 and model.bidQuantity[i-1] == 0)  
-                #                                             else model.currentDowntime[i] == 0 elif model.currentStatus[i] == 1)
-                                
                 # Define SOC constraints 
                 model.currentSOC = pyomo.Constraint(model.i, rule=lambda model, i:
                                                     model.SOC[i] == model.SOC[i - 1] + model.bidQuantity[i] - industry_demand[i]
