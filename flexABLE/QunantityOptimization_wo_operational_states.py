@@ -4,9 +4,9 @@ import pyomo.environ as pyomo
 from pyomo.opt import SolverFactory 
 
 #Electrolyzer Parameters
-maxPower = 200 #MW
+maxPower = 100 #MW
 minPower = 10 #[MW]
-effElec = 0.7 #electrolyzer efficiency[%]
+effElec = 0.4 #electrolyzer efficiency[%]
 pressElec = 30 #pressure of H2 at the end of electrolyzer [bar]
 specEnerCons = 0.005 #System Specific energy consumption per m3 H2 [MWh/Nm3]
 
@@ -15,31 +15,30 @@ energyContentH2_HHV = 0.03939 #MWh/kg or higher heating value
 #energyContentH2_m3 = 0.003 #MWh/Nm³
 
 #elect Status parameters
-minRuntime = 3
-minDowntime = 3 #hours
+minRuntime = 8
+minDowntime = 2 #hours
 shutDownafterInactivity = 4 #hours
-startUpCons = 0.2 #[MW]
-standbyCons = 0.52 #[MW]
+startUpCons = 0.52 #[MW]
+standbyCons = 0.2 #[MW]
 
 #Compressor
 specComprCons = 0.0012 #specific compressor consumption [MWh/kg]
 
 #storage parameters
-maxSOC = 3000 #kilo of H2 
+maxSOC = 2000 #kilo of H2 
 # storageVolume = 159000 #liter
 # storageTemp  = 293 #storage temperature Kelvin
 # storagePress = 31 #bar
 # pressureDiff = storagePress - pressElec #bar
 # maxSOC_kg = pressureDiff * storageVolume * 2.0159 /1.05/8.3145/storageTemp/1000  #molarMass/meanRealGasFactor/universalGasConst
 # print(maxSOC_kg, 'maxSOC_kg')
-
 industrialDemandH2 = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Electrolyzer market participation/flexABLE_w_electrolyzer/input/2016/industrial_demand.csv')  #should be in kilos 
-PFC = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Electrolyzer market participation/flexABLE_w_electrolyzer/input/2016/PFC_run1.csv')
-industrialDemandH2 = industrialDemandH2[0:960]
-PFC = PFC[0:960]
+PFC = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Electrolyzer market participation/flexABLE_w_electrolyzer/output/PFC_export.csv')
+industrialDemandH2 = industrialDemandH2[0:288]
+PFC = PFC[0:288]
 
 # Convert DataFrame columns to lists 
-price = PFC['price'].tolist()
+price = PFC['PFC'].tolist()
 industry_demand = industrialDemandH2['industry'].tolist()
 
 
@@ -48,8 +47,6 @@ industry_demand = industrialDemandH2['industry'].tolist()
 def optimizeH2Prod(price, industry_demand, time_periods):
     model = pyomo.ConcreteModel('Optimized Electroluzer Bidding')
     model.i = pyomo.RangeSet(0, len(price) - 1)
-    
-    # Define the decision variables
     model.bidQuantity_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals)
     model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
     model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
@@ -64,7 +61,7 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     # Binary variable to represent the status of the electrolyzer (on/off)
     model.isRunning = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer running')
     model.isStarted = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
-        
+    
     # Define the objective function
     model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] for i in model.i), sense=pyomo.minimize)
 
@@ -95,6 +92,7 @@ def optimizeH2Prod(price, industry_demand, time_periods):
             return pyomo.Constraint.Skip
         previous_time_periods = {i - offset for offset in range(1, minDowntime + 1) if i - offset >=0}
         return len(previous_time_periods) * model.isStarted[i] <= sum(1-model.isRunning[tt] for tt in previous_time_periods)
+
     model.minDownTime_rule = pyomo.Constraint(model.i, rule=minDownTime_rule)       
 
     model.totalProducedH2 = pyomo.Constraint(model.i, rule=lambda model, i: 
@@ -153,8 +151,8 @@ desired_year = 2016 #will get from scenarios
 optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
 
 #adding timestamp to input data
-industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/10/{desired_year} 23:45', freq='15T')
-PFC['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/10/{desired_year} 23:45', freq='15T')
+industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/3/{desired_year} 23:45', freq='15T')
+PFC['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/3/{desired_year} 23:45', freq='15T')
 
 #%% maxSOC calculation
 # # Calculate the maxSOC 
@@ -202,7 +200,7 @@ if optTimeframe == "week":
         weeklyIntervalDemand = industrialDemandH2[industrialDemandH2['Week'] == week]
         weeklyIntervalDemand = list(weeklyIntervalDemand['industry'])
         weeklyIntervalPFC = PFC[PFC['Week'] == week]
-        weeklyIntervalPFC = list(weeklyIntervalPFC['price'])
+        weeklyIntervalPFC = list(weeklyIntervalPFC['PFC'])
         time_periods = len(weeklyIntervalPFC)  
         optimalBidamount,elecCons,  comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods=time_periods)   
         allBidQuantity.extend(optimalBidamount)
@@ -225,7 +223,7 @@ elif optTimeframe == "day":
         dailyIntervalDemand = industrialDemandH2[industrialDemandH2['Date'] == day]
         dailyIntervalDemand = list(dailyIntervalDemand['industry'])
         dailyIntervalPFC = PFC[PFC['Date'] == day]
-        dailyIntervalPFC = list(dailyIntervalPFC['price'])
+        dailyIntervalPFC = list(dailyIntervalPFC['PFC'])
         time_periods = len(dailyIntervalPFC)
         # Continue with the optimization for the current daste
         optimalBidamount,elecCons,elecStandByCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand,time_periods = time_periods)   

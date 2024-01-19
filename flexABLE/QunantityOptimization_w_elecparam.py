@@ -13,6 +13,7 @@ specEnerCons = 0.005 #System Specific energy consumption per m3 H2 [MWh/Nm3]
 energyContentH2_LHV = 0.03333 #MWh/kg or lower heating value
 energyContentH2_HHV = 0.03939 #MWh/kg or higher heating value
 #energyContentH2_m3 = 0.003 #MWh/Nm³
+coldStartupAllowance = 100
 
 #elect Status parameters
 minRuntime = 3
@@ -67,11 +68,10 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.isColdStarted = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer Cold started frm Shutdown')    
     model.isIdle = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
     model.isStandBy = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
+    model.transitionToIdle = pyomo.Var(model.i, domain=pyomo.Binary)
 
-    
-        
     # Define the objective function
-    model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] for i in model.i), sense=pyomo.minimize)
+    model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i]*model.isRunning[i] for i in model.i), sense=pyomo.minimize)
 
     # Status constraints and constraining max and min bid quantity 
     model.maxPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
@@ -89,6 +89,14 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.statesExclusivity_3 = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.isStandBy[i-1] * model.isIdle[i] == 0 if i > 0 else pyomo.Constraint.Skip )    
  
+ 
+    # Status constraints and constraining max and min bid quantity 
+    model.maxPower_rule2 = pyomo.Constraint(model.i, rule=lambda model, i:
+                                            model.elecCons_MW[i] <= maxPower * (1- model.isStandBy[i]))
+
+    model.minPower_rule2 = pyomo.Constraint(model.i, rule=lambda model, i:
+                                            model.elecCons_MW[i] >= minPower * (1-model.isStandBy[i]))  
+ 
     def electrolyzerHotStarted(model, i):
         #machine can only be running if it was running in the prior period or started in this one
         if i == 0:
@@ -103,9 +111,17 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     #     if i < shutDownafterInactivity:
     #         return pyomo.Constraint.Skip
     #     else:
-    #         return  model.isIdle[i] >= model.isIdle[i-1] + model.isColdStarted[i]
+    #         return   model.isIdle[i-1] - model.isIdle[i] <= model.isColdStarted[i]
     # model.electrolyzerColdStartup = pyomo.Constraint(model.i, rule=electrolyzerColdStartup) 
 
+    # def electrolyzerColdStartup(model, i):
+    #     #machine can only be running if it was running in the prior period or started in this one
+    #     if i < shutDownafterInactivity:
+    #         return pyomo.Constraint.Skip
+    #     else:
+    #         return   model.isIdle[i-1] - model.isIdle[i] <= model.isColdStarted[i]
+
+    # model.electrolyzerColdStartup = pyomo.Constraint(model.i, rule=electrolyzerColdStartup) 
     # def electrolyzerShutDown(model, i):
     #     #machine can only be running if it was running in the prior period or started in this one
     #     if i < shutDownafterInactivity:
@@ -115,14 +131,11 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     # model.electrolyzerShutDown = pyomo.Constraint(model.i, rule=electrolyzerShutDown) 
     
     def electrolyzerShutDown_2(model, i):
-        #machine can only be running if it was running in the prior period or started in this one
         if i < shutDownafterInactivity:
             return pyomo.Constraint.Skip
         else:
-            # period  = int(-(-startUpCons//standbyCons))
-            return sum(model.isStandBy[j] for j in range(i - shutDownafterInactivity + 1, i + 1)) <= shutDownafterInactivity*model.isIdle[i] 
-    model.electrolyzerShutDown_2 = pyomo.Constraint(model.i, rule=electrolyzerShutDown_2)         
-    
+            return model.isIdle[i] >= model.isStandBy[i-1] + sum(model.isStandBy[j] for j in range(i - shutDownafterInactivity, i + 1))/shutDownafterInactivity
+    model.electrolyzerShutDown_2 = pyomo.Constraint(model.i, rule=electrolyzerShutDown_2)              
     
     def minRuntime_rule(model, i):
         #force the minimum runtime after a start event
@@ -153,13 +166,6 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.compressorElectricalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                 model.comprCons_MW[i] == model.elecToStorage_kg[i] * specComprCons)
 
-    # def elecStandbyConsumption_rule(model, i):
-    #     if i <= len(price)-2:
-    #         return pyomo.Constraint.Skip
-    #     else:
-    #         return model.elecStandByCons_MW[i] == standbyCons * sum(1-model.isRunning[j] for j in range(0, i))
-    # model.elecStandbyConsumption_rule = pyomo.Constraint(model.i, rule=elecStandbyConsumption_rule)           
-    
     model.totalElectricalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                             model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i])  #model.elecStandByCons_MW[i] ++ model.elecStartUpCons_MW[i]
     
@@ -242,10 +248,9 @@ def optimizeH2Prod(price, industry_demand, time_periods):
 #%%    # Solve the optimization problem
     opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
     result = opt.solve(model, tee=True)
-
     print('Solver status:', result.solver.status)
     print('Termination condition: ', result.solver.termination_condition)
-    
+
     # Retrieve the optimal values
     optimalBidamount = [model.bidQuantity_MW[i].value for i in model.i]
     elecCons = [model.elecCons_MW[i].value for i in model.i]            
@@ -323,6 +328,7 @@ if optTimeframe == "week":
         weeklyIntervalPFC = list(weeklyIntervalPFC['price'])
         time_periods = len(weeklyIntervalPFC)  
         optimalBidamount,elecCons,  comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods=time_periods)   
+        pyomo.timer.toc('Finished parameter sweep')
         allBidQuantity.extend(optimalBidamount)
         allelecCons.extend(elecCons)
         allcomprCons.extend(comprCons)

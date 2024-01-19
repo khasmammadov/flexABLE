@@ -1,4 +1,4 @@
-﻿name,technology,minPower,maxPower,effElec,effStrg,specEnerCons,pressElec,presStorage,maxSOC,minDowntime,company
-Elec_x,PEM,10,100,0.7,0.97,0.005,30,700,500,0.5,Refining
-Elec_y,AEL,10,100,0.7,0.97,0.005,30,700,500,0.5,Steel
-Elec_z,SOEL,10,100,0.7,0.97,0.005,30,700,500,0.5,Ammonium
+﻿name,technology,minPower,maxPower,effElec,specEnerCons,minDowntime,minRuntime,shutDownafterInactivity,startUpCons,standbyCons,comprCons,maxSOC,company
+Elec_x,PEM,10,100,0.4,0.005,0.5,2,3,0.52,0.2,0.0012,2000,Refining
+Elec_y,AEL,10,100,0.7,0.005,0.5,2,3,0.52,0.2,0.0012,3000,Steel
+Elec_z,SOEL,10,100,0.7,0.005,0.5,2,3,0.52,0.2,0.0012,1500,Ammonium

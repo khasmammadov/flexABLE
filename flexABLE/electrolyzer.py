@@ -13,25 +13,26 @@ class Electrolyzer():
                  agent=None,
                  name = 'Elec_x',
                  technology = 'PEM',
-                 minPower = 90, #[MW]
-                 maxPower = 0.1, #[%] minimum partial load 
+                 minPower = 10, #[MW]
+                 maxPower = 100, #[MW] max power 
                  effElec = 0.7, #electrolyzer efficiency[%]
-                 effStrg = 0.90, #Storage efficiency[%]
-                 specEnerCons = 0.005, #System Specific energy consumption per m3 H2 [MWh/Nm3]
-                 pressElec = 30, #pressure of H2 at the end of electrolyzer [bar]
-                 presStorage = 700, #H2 storage pressure [bar]
-                 maxSOC = 2000, #still unknown
+                 specEnerCons = 0.005, #System Specific energy consumption per m3 H2 [MWh/Nm3]                 
                  minDowntime = 0.5, #hours
+                 minRuntime = 2, #hours
+                 shutDownafterInactivity = 3, #[hr]after certain period of standby mode, Electrolyzer turns off 
+                 startUpCons = 0.52, #[MW] Startup consumotion of electrolyzer
+                 standbyCons = 0.2, #[MW] Stanby consumption of electrolyzer
+                 comprCons = 0.012,  #[MW]Compressor consumption 
+                 maxSOC = 2000, #Kg
                  industry = 'Refining', 
                  world = None,
                  node = None,
                  **kwargs):
         
-        self.energyContentH2_kg = 0.03333 #MWh/kg or 
-        self.energyContentH2_m3 = 0.003 #MWh/Nm³
+        self.energyContentH2_LHV = 0.03333 #MWh/kg or lower heating value of H2
+        self.minRuntime /= self.world.dt
         self.minDowntime /= self.world.dt          
-
-        self.installedCapacity =  100 #MW  
+        self.shutDownafterInactivity /= self.world.dt          
         
         # bids status parameters
         self.dictCapacity = {n:0 for n in self.world.snapshots}
@@ -39,8 +40,6 @@ class Electrolyzer():
         
         # Unit status parameters
         self.sentBids = []
-        # self.currentDowntime = self.minDowntime # Keeps track of the electrolyzer if it reached the minimum shutdown time
-        # self.currentStatus = 0  # 0 means the electrolyzer is currently off, 1 means it is on
         
     #For the production of 1kg of hydrogen, about 9 kg of water and 60kWh of electricity are consumed(Rievaj, V., Gaňa, J., & Synák, F. (2019). Is hydrogen the fuel of the future?)
     # manages the available capacity, energy storage (SOC), energy cost, and tracks the success of the market. 
@@ -49,7 +48,7 @@ class Electrolyzer():
         
         for bid in self.sentBids: 
             if 'demandEOM' in bid.ID: #If the bid's ID contains the substring 'demandEOM', it increases the available capacity at the current time step
-                self.dictCapacity[self.world.currstep] -= bid.confirmedAmount
+                self.dictCapacity[self.world.currstep] = bid.confirmedAmount
 
         # if self.world.currstep < len(self.world.snapshots) - 1: #all simulation except the last
         #     if self.dictCapacity[self.world.currstep] < 0: #demand 
@@ -89,19 +88,17 @@ class Electrolyzer():
         bidsEOM = []
         if os.path.exists('output/optimizedBidAmount.csv'):
             optimalBidAmount_all = pd.read_csv("output/optimizedBidAmount.csv")
-            bidQuantity_demand=optimalBidAmount_all["bidQuantity"][t] 
+            bidQuantity_demand=optimalBidAmount_all["bidQuantity"][t]
+            #TODO 
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand) 
-        else: 
-            #TODO: set up electrolyzer parameters here
-            
+        else:             
             #set up user input variables
             simulationYear = 2016
             lastMonth = 1 #input("Please input simulation end month: ") #will get from scenarios 
-            lastDay = 7 #input("Please input simulation end day: ") #will get from scenarios 
-            # production_mode = '1' #input("Choose optimization mode, 1 for regular production 2 for flexible production: ")
+            lastDay = 3 #input("Please input simulation end day: ") #will get from scenarios 
             optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
             
-            #setup optimization input values
+            #setup optimization input data from flexable
             industrialDemandH2 = self.world.industrial_demand
             PFC = [round(p, 2) for p in self.world.PFC]
             PFC = pd.DataFrame(PFC, columns=['PFC']) 
@@ -129,38 +126,94 @@ class Electrolyzer():
             # maxSOC = max(demandSum)
 
             # Defining optimization function       
-            def  optimizeH2Prod(price, industry_demand):
-                model = pyomo.ConcreteModel()
-                model.i = pyomo.RangeSet(0, len(price)-1)
+            def  optimizeH2Prod(price, industry_demand, time_periods):
+                model = pyomo.ConcreteModel('Optimized Electroluzer Bidding')
+                model.i = pyomo.RangeSet(0, len(price) - 1)
+                model.bidQuantity_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals)
+                model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
+                model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
+                model.elecStandByCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
+                model.elecStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
+                model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
+                model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
+                model.elecToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to process
+                model.storageToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from storage to process
+                model.currentSOC_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #Status of Storage
 
-                # Define the decision variables
-                model.bidQuantity = pyomo.Var(model.i, domain=pyomo.NonNegativeReals)
-                model.SOC = pyomo.Var(model.i) 
-                
+                # Binary variable to represent the status of the electrolyzer (on/off)
+                model.isRunning = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer running')
+                model.isStarted = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
                 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] for i in model.i), sense=pyomo.minimize)
 
-                # Define SOC constraints 
-                model.currentSOC = pyomo.Constraint(model.i, rule=lambda model, i:
-                                                    model.SOC[i] == model.SOC[i - 1] + model.bidQuantity[i] - industry_demand[i]
-                                                    if i > 0 else model.SOC[i] == model.bidQuantity[i] - industry_demand[i])   #for initial timestep at each optimization cycle
-                model.maxSOC = pyomo.Constraint(model.i, rule=lambda model, i: model.SOC[i] <= self.maxSOC)
-            
-                # Demand should be covered at each step 
-                model.demandCoverage_i = pyomo.Constraint(model.i, rule=lambda model, i: model.SOC[i] >= industry_demand[i]) #clarify unit, power/energy conversation
+                #electrolyzer can only be running if it was running in the prior period or started in this one
+                def electrolyzerStarted(model, i): 
+                    if i == 0:
+                        return pyomo.Constraint.Skip
+                    else:
+                        return model.isRunning[i]<= model.isRunning[i-1] + model.isStarted[i]
+                model.electrolyzerStarted = pyomo.Constraint(model.i, rule=electrolyzerStarted)    
                 
-                # Max installed capacity constraint 
-                model.maxPower = pyomo.Constraint(model.i, rule=lambda model, i: model.bidQuantity[i] <= self.installedCapacity)
+                #minimum run time constraint
+                def minRuntime_rule(model, i):
+                    next_time_periods = {i + offset for offset in range(int(self.minRuntime)) if i + offset < time_periods}
+                    return sum(model.isRunning[tt] for tt in next_time_periods) >= len(next_time_periods) * model.isStarted[i]
+                model.minRuntime_rule = pyomo.Constraint(model.i, rule=minRuntime_rule)       
+                
+                #minimum StandbyTime time constraint
+                def minDownTime_rule(model, i):
+                    if i == 0:
+                        return pyomo.Constraint.Skip
+                    previous_time_periods = {i - offset for offset in range(1, int(self.minDowntime) + 1) if i - offset >=0}
+                    return len(previous_time_periods) * model.isStarted[i] <= sum(1-model.isRunning[tt] for tt in previous_time_periods)
+                model.minDownTime_rule = pyomo.Constraint(model.i, rule=minDownTime_rule)     
 
+                # Maximum power constraint of electrolyzer
+                model.maxPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
+                                                        model.elecCons_MW[i] <= self.maxPower * model.isRunning[i])
+                # Minimum power constraint of electrolyzer
+                model.minPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
+                                                        model.elecCons_MW[i] >= self.minPower * model.isRunning[i])                
+
+                model.totalProducedH2 = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                    model.elecCons_MW[i] ==  model.prodH2_kg[i] / 0.25 / self.effElec * self.energyContentH2_LHV)
+                
+                model.producedH2allocation_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                        model.prodH2_kg[i] == model.elecToPlantUse_kg[i] + model.elecToStorage_kg[i]) 
+                
+                model.producedH2allocation_rule2 = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                        model.elecToPlantUse_kg[i] <= industry_demand[i])      
+                
+                model.producedH2allocation_rule3 = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                        model.storageToPlantUse_kg[i] == industry_demand[i] - model.elecToPlantUse_kg[i])  
+                    
+                model.comprConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                            model.comprCons_MW[i] == model.elecToStorage_kg[i] * self.comprCons)
+            
+                model.totalElectricalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i]) 
+                # Define Storage constraint
+                model.currentSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i:
+                                                    model.currentSOC_kg[i] == model.currentSOC_kg[i - 1] + model.elecToStorage_kg[i] - model.storageToPlantUse_kg[i]
+                                                    if i > 0 else model.currentSOC_kg[i] == model.elecToStorage_kg[i]  - model.storageToPlantUse_kg[i])  
+                
+                model.maxSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                    model.currentSOC_kg[i] <= self.maxSOC)
+                
+                # Demand should be covered at each step 
+                model.demandCoverage_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                model.currentSOC_kg[i] >= model.storageToPlantUse_kg[i])
+                                    
                 # Solve the optimization problem
                 opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
-                result = opt.solve(model)
+                result = opt.solve(model, tee=True)
+                
                 print('INFO: Solver status:', result.solver.status)
                 print('INFO: Results: ', result.solver.termination_condition)
 
                 # Retrieve the optimal values
-                optimalBidAmount = [model.bidQuantity[i].value for i in model.i]
+                optimalBidAmount = [model.bidQuantity_MW[i].value for i in model.i]
                 return optimalBidAmount
 
             optimalBidAmount_all = [] #optimization reults for all optimized days
@@ -177,8 +230,10 @@ class Electrolyzer():
                     weeklyIntervalDemand = list(weeklyIntervalDemand['industry'])
                     weeklyIntervalPFC = PFC[PFC['Week'] == week]
                     weeklyIntervalPFC = list(weeklyIntervalPFC['PFC'])
+                    time_periods = len(weeklyIntervalPFC)  
+                    
                     #Perform optimization for each week
-                    optimalBidamount = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand)
+                    optimalBidamount = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods = time_periods)
                     optimalBidAmount_all.extend(optimalBidamount)
             elif optTimeframe == "day":
                 print('INFO: Daily optimization is being performed')
@@ -192,37 +247,18 @@ class Electrolyzer():
                     dailyIntervalDemand = list(dailyIntervalDemand['industry'])
                     dailyIntervalPFC = PFC[PFC['Date'] == day]
                     dailyIntervalPFC = list(dailyIntervalPFC['PFC'])
+                    time_periods = len(dailyIntervalPFC)  
+
                     #Perform optimization for each day
-                    optimalBidamount = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand)
+                    optimalBidamount = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand, time_periods = time_periods)
                     optimalBidAmount_all.extend(optimalBidamount)
-
-                    # #implement power on logic
-                    # for i in range(len(optimalBidamount)):
-                    #     if self.currentStatus == 0:  # Electrolyzer plant is off
-                    #         if optimalBidamount[i - 1] == 0:  # Adds to the counter of the number of steps it was off
-                    #             self.currentDowntime += 1
-                    #         elif self.currentDowntime >= self.minDowntime:  # Electrolyzer can turn on
-                    #             if optimalBidamount[i] >= self.minPower:
-                    #                 self.currentDowntime = 0
-                    #                 self.currentStatus = 1
-                    #             else:
-                    #                 optimalBidamount[i] = 0
-                    #                 self.currentStatus = 0
-                    #     else:  # currentStatus == 1
-                    #         if optimalBidamount[i] < self.minPower:  # self.minPower:
-                    #             self.currentStatus = 0
-                    #             self.currentDowntime = 1
-                    #         else:
-                    #             self.currentStatus = 1
-                    #     if self.currentStatus or not self.currentStatus and self.currentDowntime >= self.minDowntime:
-                    #         optimalBidAmount_all.extend(optimalBidamount)
-                    #         print(optimalBidamount)   
-
+            
+            #TODO What about different plants and demands? 
             #exporting optimization results, happens one time then code uses exported csv file for the rest of the simulation
             output = {'timestamp': industrialDemandH2['Timestamp'], 'bidQuantity': optimalBidAmount_all }
             df = pd.DataFrame(output)
-            df.to_csv('output/optimizedBidAmount.csv', index=False)
-        
+            df.to_csv('output/optimizedBidAmount.csv', index=True)
+            
             #save results into bid request
             bidQuantity_demand = optimalBidAmount_all[t]
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand)
