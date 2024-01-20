@@ -262,7 +262,7 @@ class World():
                 os.makedirs(directory)
                 os.makedirs(directory+'/PP_capacities')
                 os.makedirs(directory+'/STO_capacities')
-                # os.makedirs(directory+'/Elec_capacities')
+                os.makedirs(directory+'/Elec_capacities')
 
                 
             # writing EOM market prices as CSV
@@ -295,12 +295,12 @@ class World():
                 tempDF = pd.DataFrame(powerplant.dictCapacity, index=['Power']).T
                 tempDF = tempDF.drop([-1], axis = 0).set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
                 
-                tempDF.to_csv(directory + '{}_Capacity.csv'.format(powerplant.name))
+                tempDF.to_csv(directory + '/Elec_capacities/{}_Capacity.csv'.format(powerplant.name))
             
             logger.info('Saving results complete')
             
-            for powerplant in self.powerplants:
-                tempDF.to_csv(directory + 'PP_capacities/{}_Capacity.csv'.format(powerplant.name))
+            # for powerplant in self.powerplants:
+            #     tempDF.to_csv(directory + 'PP_capacities/{}_Capacity.csv'.format(powerplant.name))
             
         logger.info("#########################")
         
@@ -350,8 +350,8 @@ class World():
         logger.info("Loading Agents and assets....")
         
         powerplantsList = pd.read_csv('input/{}/FPP_DE.csv'.format(scenario),
-                                      index_col = 0,
-                                      encoding = "Latin-1")
+                                    index_col = 0,
+                                    encoding = "Latin-1")
         
         # =====================================================================
         # Add all unique agents (power plant operators)    
@@ -366,8 +366,8 @@ class World():
             if checkAvailability:
                 try:
                     availability= pd.read_csv('input/{}/Availability/{}.csv'.format(scenario,powerplant),
-                                              nrows = len(self.snapshots) + startingPoint,
-                                              index_col = 0)
+                                            nrows = len(self.snapshots) + startingPoint,
+                                            index_col = 0)
                     
                     availability.drop(availability.index[0:startingPoint], inplace = True)
                     availability.reset_index(drop = True, inplace = True)
@@ -387,8 +387,8 @@ class World():
         # =====================================================================
         if importStorages: 
             storageList = pd.read_csv('input/{}/STO_DE.csv'.format(scenario),
-                                      index_col = 0,
-                                      encoding = "Latin-1")
+                                    index_col = 0,
+                                    encoding = "Latin-1")
     
             for _ in storageList.company.unique():
                 if _ not in self.agents:
@@ -403,16 +403,9 @@ class World():
         # =====================================================================
         if importElectrolyzer: 
             electrolyzerList = pd.read_csv('input/{}/electrolyzers.csv'.format(scenario),
-                                      index_col = 0,
-                                      # encoding = "Latin-1"
-                                      )
-            industrial_demand = pd.read_csv('input/{}/industrial_demand.csv'.format(scenario),
-                                nrows = len(self.snapshots) + startingPoint,
-                                index_col = 0)
-            industrial_demand.drop(industrial_demand.index[0:startingPoint], inplace = True)
-            industrial_demand.reset_index(drop = True, inplace = True)
-            self.industrial_demand = industrial_demand
-        
+                                    index_col = 0,
+                                    # encoding = "Latin-1"
+                                    )
             for _ in electrolyzerList.company.unique():
                 if _ not in self.agents:
                     self.addAgent(_)
@@ -420,16 +413,23 @@ class World():
             for electrolyzer, data in electrolyzerList.iterrows():
                 self.agents[data['company']].addElectrolyzer(electrolyzer, **dict(data))
             
-            logger.info("Industrial hydrogen demand loaded.")
-
+            #import industrial H2 demand
+            industrial_demand = pd.read_csv('input/{}/industrial_demand.csv'.format(scenario),
+                                nrows = len(self.snapshots) + startingPoint,
+                                index_col = 0)
+            industrial_demand.drop(industrial_demand.index[0:startingPoint], inplace = True)
+            industrial_demand.reset_index(drop = True, inplace = True)
+            self.industrial_demand = industrial_demand            
+            
+            logger.info("Electrolyzer list and Industrial hydrogen demand loaded.")
 
         # =====================================================================
         # Load renewable power generation  
         # =====================================================================
         vrepowerplantFeedIn = pd.read_csv('input/{}/FES_DE.csv'.format(scenario),
-                                          index_col = 0,
-                                          nrows = len(self.snapshots) + startingPoint,
-                                          encoding = "Latin-1")
+                                        index_col = 0,
+                                        nrows = len(self.snapshots) + startingPoint,
+                                        encoding = "Latin-1")
         
         vrepowerplantFeedIn.drop(vrepowerplantFeedIn.index[0:startingPoint], inplace = True)
         vrepowerplantFeedIn.reset_index(drop = True, inplace = True)

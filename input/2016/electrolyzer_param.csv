@@ -1,2 +1,0 @@
-name,technology,nomPower,minLoad,maxLoad,effElec,effStrg,specEnerCons,pressElec,presStorage,minDowntime,company
-Elec_x,PEM,100,0.1,1.5,0.7,0.97,0.005,30,700,0.5,xFuels

@@ -5,9 +5,11 @@ import pandas as pd
 import pyomo.environ as pyomo
 from pyomo.opt import SolverFactory 
 import os
+from datetime import datetime
+from datetime import date
+import pandas as pd
 
 class Electrolyzer():
-    
     @initializer
     def __init__(self,
                  agent=None,
@@ -42,10 +44,8 @@ class Electrolyzer():
         self.sentBids = []
         
     #For the production of 1kg of hydrogen, about 9 kg of water and 60kWh of electricity are consumed(Rievaj, V., Gaňa, J., & Synák, F. (2019). Is hydrogen the fuel of the future?)
-    # manages the available capacity, energy storage (SOC), energy cost, and tracks the success of the market. 
     def step(self): 
         self.dictCapacity[self.world.currstep] = 0 #It initializes the available capacity at the current time step to zero.
-        
         for bid in self.sentBids: 
             if 'demandEOM' in bid.ID: #If the bid's ID contains the substring 'demandEOM', it increases the available capacity at the current time step
                 self.dictCapacity[self.world.currstep] = bid.confirmedAmount
@@ -86,10 +86,9 @@ class Electrolyzer():
     # calculation EOM bid
     def calculateBidEOM(self, t):
         bidsEOM = []
-        if os.path.exists('output/optimizedBidAmount.csv'):
-            optimalBidAmount_all = pd.read_csv("output/optimizedBidAmount.csv")
-            bidQuantity_demand=optimalBidAmount_all["bidQuantity"][t]
-            #TODO 
+        if os.path.exists('output/{}/Elec_capacities/{}_optimizedBidAmount.csv'.format(self.world.scenario, self.name)):
+            optimization_results = pd.read_csv('output/{}/Elec_capacities/{}_optimizedBidAmount.csv'.format(self.world.scenario, self.name))
+            bidQuantity_demand = optimization_results["bidQuantity"][t] 
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand) 
         else:             
             #set up user input variables
@@ -97,14 +96,8 @@ class Electrolyzer():
             lastMonth = 1 #input("Please input simulation end month: ") #will get from scenarios 
             lastDay = 3 #input("Please input simulation end day: ") #will get from scenarios 
             optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
-            
-            #setup optimization input data from flexable
-            industrialDemandH2 = self.world.industrial_demand
-            PFC = [round(p, 2) for p in self.world.PFC]
-            PFC = pd.DataFrame(PFC, columns=['PFC']) 
-            industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')
-            PFC['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')
-            
+        
+
             # # Calculate the maxSOC - Max SOC represents calculated  cumulative max total weekly or daily demand
             # demandSum = [] #weekly or daily demand sum
             # if optTimeframe == "week":
@@ -207,17 +200,46 @@ class Electrolyzer():
                                     
                 # Solve the optimization problem
                 opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
-                result = opt.solve(model, tee=True)
+                result = opt.solve(model ) #tee=True
                 
                 print('INFO: Solver status:', result.solver.status)
                 print('INFO: Results: ', result.solver.termination_condition)
 
                 # Retrieve the optimal values
                 optimalBidAmount = [model.bidQuantity_MW[i].value for i in model.i]
-                return optimalBidAmount
+                elecCons = [model.elecCons_MW[i].value for i in model.i]            
+                elecStandByCons = [model.elecStandByCons_MW[i].value for i in model.i]           
+                comprCons = [model.comprCons_MW[i].value for i in model.i]
+                prodH2 = [ model.prodH2_kg[i].value for i in model.i]           
+                elecToPlantUse_kg = [ model.elecToPlantUse_kg[i].value for i in model.i]            
+                elecToStorage_kg = [ model.elecToStorage_kg[i].value for i in model.i]            
+                storageToPlantUse_kg = [ model.storageToPlantUse_kg[i].value for i in model.i]            
+                currentSOC = [model.currentSOC_kg[i].value for i in model.i]                
+                isRunning =   [model.isRunning[i].value for i in model.i]
+                isStarted = [model.isStarted[i].value for i in model.i]
+                return optimalBidAmount,elecCons, comprCons,  prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted
 
-            optimalBidAmount_all = [] #optimization reults for all optimized days
-            #setting optimization modes and calling optimization function
+            
+            #setup optimization input data from flexable
+            industrialDemandH2 = self.world.industrial_demand[self.name]
+            industrialDemandH2 = pd.DataFrame(industrialDemandH2, columns=[self.name])
+            PFC = [round(p, 2) for p in self.world.PFC]
+            PFC = pd.DataFrame(PFC, columns=['PFC']) 
+            industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')            
+            PFC['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')
+            
+            #optimization reults for all optimized days
+            optimalBidAmount_all = [] 
+            elecCons_all = []
+            comprCons_all = []
+            prodH2_all = []
+            elecToPlantUse_kg_all = []
+            elecToStorage_kg_all = []
+            storageToPlantUse_kg_all = []
+            currentSOC_all = []
+            isRunning_all = []
+            isStarted_all = []
+            #setting optimization timeframe and calling optimization function
             if optTimeframe == "week":
                 print('INFO: Weekly optimization is being performed')
                 # find weeks from timestamp
@@ -233,8 +255,25 @@ class Electrolyzer():
                     time_periods = len(weeklyIntervalPFC)  
                     
                     #Perform optimization for each week
-                    optimalBidamount = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods = time_periods)
-                    optimalBidAmount_all.extend(optimalBidamount)
+                    optimalBidAmount,elecCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods = time_periods)
+                    
+                    #calculating stanby time, Standby consumption added to first timestep 
+                    standbyCount = isRunning.count(0)
+                    print(standbyCount, 'standbyCount')
+                    elecStandByCons = self.standbyCons * standbyCount
+                    optimalBidAmount[0] = optimalBidAmount[t] + elecStandByCons 
+                    #output results
+                    optimalBidAmount_all.extend(optimalBidAmount)                    
+                    elecCons_all.extend(elecCons)
+                    comprCons_all.extend(comprCons)
+                    prodH2_all.extend(prodH2)
+                    elecToPlantUse_kg_all.extend(elecToPlantUse_kg)
+                    elecToStorage_kg_all.extend(elecToStorage_kg)
+                    storageToPlantUse_kg_all.extend(storageToPlantUse_kg)
+                    currentSOC_all.extend(currentSOC)
+                    isRunning_all.extend(isRunning)
+                    isStarted_all.extend(isStarted)
+
             elif optTimeframe == "day":
                 print('INFO: Daily optimization is being performed')
                 # find days from timestamp
@@ -244,22 +283,68 @@ class Electrolyzer():
                 for day in unique_days:
                     # Extract data for the current day
                     dailyIntervalDemand = industrialDemandH2[industrialDemandH2['Date'] == day]
-                    dailyIntervalDemand = list(dailyIntervalDemand['industry'])
+                    dailyIntervalDemand = list(dailyIntervalDemand[self.name])
                     dailyIntervalPFC = PFC[PFC['Date'] == day]
                     dailyIntervalPFC = list(dailyIntervalPFC['PFC'])
                     time_periods = len(dailyIntervalPFC)  
 
                     #Perform optimization for each day
-                    optimalBidamount = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand, time_periods = time_periods)
-                    optimalBidAmount_all.extend(optimalBidamount)
+                    optimalBidAmount,elecCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand, time_periods = time_periods)
+                    
+                    #calculating stanby time, Standby consumption added to first timestep 
+                    standbyCount = isRunning.count(0)
+                    print(standbyCount, 'standbyCount')
+                    elecStandByCons = self.standbyCons * standbyCount
+                    optimalBidAmount[0] += elecStandByCons 
+                    
+                    # isRunning_np = np.array(isRunning)
+                    # isRunning_diff = np.diff(isRunning_np)
+                    # isRunning_diff = np.append(isRunning_diff, 0)  # Add 0 at the end to match the length of isRunning
+                    # consecutive_zeros_start = np.where(isRunning_diff == -1)[0]
+                    # consecutive_zeros_end = np.where(isRunning_diff == 1)[0]
+                    # for i in consecutive_zeros_start:
+                    #     consecutive_zeros = consecutive_zeros_start[i] - consecutive_zeros_end[i]
+                    # print(consecutive_zeros, len(consecutive_zeros), 'consecutive_zeros')
+                    
+                    # # if len(consecutive_zeros) >= self.shutDownafterInactivity:
+                    # #     for i in consecutive_zeros:
+                    # #         if i + 1 < len(isRunning) and isRunning[i + 1] == 1:
+                    # #             optimalBidAmount[min(i + 1, len(optimalBidAmount) - 1)] += self.startupConsumption
+                    #output results
+                    optimalBidAmount_all.extend(optimalBidAmount)                    
+                    elecCons_all.extend(elecCons)
+                    comprCons_all.extend(comprCons)
+                    prodH2_all.extend(prodH2)
+                    elecToPlantUse_kg_all.extend(elecToPlantUse_kg)
+                    elecToStorage_kg_all.extend(elecToStorage_kg)
+                    storageToPlantUse_kg_all.extend(storageToPlantUse_kg)
+                    currentSOC_all.extend(currentSOC)
+                    isRunning_all.extend(isRunning)
+                    isStarted_all.extend(isStarted)
             
-            #TODO What about different plants and demands? 
-            #exporting optimization results, happens one time then code uses exported csv file for the rest of the simulation
-            output = {'timestamp': industrialDemandH2['Timestamp'], 'bidQuantity': optimalBidAmount_all }
+        #exporting optimization results, happens one time then code uses exported csv file for the rest of the simulation
+            directory = 'output/{}/Elec_capacities'.format(self.world.scenario)
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            
+            output = {'timestamp': industrialDemandH2['Timestamp'], 
+                        'bidQuantity': optimalBidAmount_all,
+                        'electrolyzer_consumption': elecCons_all,
+                        'compressor_consumption': comprCons_all,
+                        'produced_h2': prodH2_all,
+                        'electrolyzer_to_plant_h2': elecToPlantUse_kg_all,
+                        'electrolyzer_to_storage_h2': elecToStorage_kg_all,
+                        'storage_to_plant_h2': storageToPlantUse_kg_all,
+                        'SOC': currentSOC_all,
+                        'isRunning': isRunning_all,
+                        'hotstart': isStarted_all,
+                        'PFC': PFC['PFC'],
+                        'h2demand': industrialDemandH2[self.name]}
             df = pd.DataFrame(output)
-            df.to_csv('output/optimizedBidAmount.csv', index=True)
-            
+            df.to_csv( directory + '/{}_optimizedBidAmount.csv'.format(self.name), index=True)
             #save results into bid request
             bidQuantity_demand = optimalBidAmount_all[t]
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand)
         return bidsEOM
+    
+    

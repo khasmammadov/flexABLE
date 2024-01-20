@@ -79,5 +79,3 @@ class Agent():
     
     def requestBid(self, t, market = "EOM"):
         return self.calculateBid(t, market)
-    
-    
