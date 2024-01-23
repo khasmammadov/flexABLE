@@ -17,13 +17,13 @@ class Electrolyzer():
                  maxPower = 100, #[MW] max power 
                  effElec = 0.7, #electrolyzer efficiency[%]
                  specEnerCons = 0.005, #System Specific energy consumption per m3 H2 [MWh/Nm3]                 
-                 minDowntime = 0.5, #hours
+                 minDowntime = 0.5, #minimum standby time hours
                  minRuntime = 2, #hours
                  shutDownafterInactivity = 3, #[hr]after certain period of standby mode, Electrolyzer turns off 
                  startUpCons = 0.52, #[MW] Startup consumotion of electrolyzer
                  standbyCons = 0.2, #[MW] Stanby consumption of electrolyzer
                  comprCons = 0.012,  #[MW]Compressor consumption 
-                 maxSOC = 2000, #Kg
+                 maxSOC = 2000, #Kg 
                  industry = 'Refining', 
                  world = None,
                  node = None,
@@ -327,7 +327,6 @@ class Electrolyzer():
                     #add startup consumption to first active timestep
                     first_active_timestep = isRunning.index(1)
                     optimalBidAmount[int(first_active_timestep)] += self.startUpCons
-                    print(first_active_timestep, 'first_active_timestep')
 
                     isRunning_np = np.array(isRunning)
                     isRunning_diff = np.diff(isRunning_np)

@@ -50,8 +50,6 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.bidQuantity_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals)
     model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
     model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-    model.elecStandByCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-    model.elecStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
     model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
     model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
     model.elecToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to process
@@ -92,7 +90,6 @@ def optimizeH2Prod(price, industry_demand, time_periods):
             return pyomo.Constraint.Skip
         previous_time_periods = {i - offset for offset in range(1, minDowntime + 1) if i - offset >=0}
         return len(previous_time_periods) * model.isStarted[i] <= sum(1-model.isRunning[tt] for tt in previous_time_periods)
-
     model.minDownTime_rule = pyomo.Constraint(model.i, rule=minDownTime_rule)       
 
     model.totalProducedH2 = pyomo.Constraint(model.i, rule=lambda model, i: 
@@ -111,7 +108,7 @@ def optimizeH2Prod(price, industry_demand, time_periods):
                                                 model.comprCons_MW[i] == model.elecToStorage_kg[i] * specComprCons)
  
     model.totalElectricalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                            model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i] + model.elecStandByCons_MW[i]) # sum(model.isRunning[j].value for j in range(max(0, i - 1), i) sum(model.elecStandByCons_MW[i])  #model.elecStandByCons_MW[i] ++ model.elecStartUpCons_MW[i]
+                                            model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i] ) # sum(model.isRunning[j].value for j in range(max(0, i - 1), i) sum(model.elecStandByCons_MW[i])  #model.elecStandByCons_MW[i] ++ model.elecStartUpCons_MW[i]
     
     # Define Storage constraint
     model.currentSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i:
@@ -135,7 +132,6 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     # Retrieve the optimal values
     optimalBidamount = [model.bidQuantity_MW[i].value for i in model.i]
     elecCons = [model.elecCons_MW[i].value for i in model.i]            
-    elecStandByCons = [model.elecStandByCons_MW[i].value for i in model.i]           
     comprCons = [model.comprCons_MW[i].value for i in model.i]
     prodH2 = [ model.prodH2_kg[i].value for i in model.i]           
     elecToPlantUse_kg = [ model.elecToPlantUse_kg[i].value for i in model.i]            
@@ -144,7 +140,7 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     currentSOC = [model.currentSOC_kg[i].value for i in model.i]                
     isRunning =   [model.isRunning[i].value for i in model.i]
     isStarted = [model.isStarted[i].value for i in model.i]
-    return optimalBidamount,elecCons, elecStandByCons, comprCons,  prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted
+    return optimalBidamount,elecCons, comprCons,  prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted
 
 #set up user input variables
 desired_year = 2016 #will get from scenarios 
@@ -179,7 +175,6 @@ PFC['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/3/{desired
 
 allBidQuantity = []
 allelecCons = []
-all_elecStandByCons = []
 allcomprCons = []
 allprodH2 = []
 allelecToPlantUse_kg = []
@@ -226,10 +221,9 @@ elif optTimeframe == "day":
         dailyIntervalPFC = list(dailyIntervalPFC['PFC'])
         time_periods = len(dailyIntervalPFC)
         # Continue with the optimization for the current daste
-        optimalBidamount,elecCons,elecStandByCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand,time_periods = time_periods)   
+        optimalBidamount,elecCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=dailyIntervalPFC, industry_demand=dailyIntervalDemand,time_periods = time_periods)   
         allBidQuantity.extend([round(item, 3) for item in optimalBidamount])
         allelecCons.extend([round(item, 3) for item in elecCons])
-        all_elecStandByCons.extend(elecStandByCons)        
         allcomprCons.extend([round(item, 3) for item in comprCons])
         allprodH2.extend([round(item, 3) for item in prodH2])
         allelecToPlantUse_kg.extend([round(item, 3) for item in elecToPlantUse_kg])
@@ -243,7 +237,6 @@ elif optTimeframe == "day":
 # Export variables to CSV file
 data = {'industry_demand': industry_demand, 
         'optimalBidamount': allBidQuantity,
-        'elecStandByCons': all_elecStandByCons,
         'elecCons': allelecCons,
         'comprCons': allcomprCons, 
         'prodH2': allprodH2,

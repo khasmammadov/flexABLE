@@ -68,7 +68,6 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.isColdStarted = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer Cold started frm Shutdown')    
     model.isIdle = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
     model.isStandBy = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
-    model.transitionToIdle = pyomo.Var(model.i, domain=pyomo.Binary)
 
     # Define the objective function
     model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i]*model.isRunning[i] for i in model.i), sense=pyomo.minimize)
@@ -90,12 +89,12 @@ def optimizeH2Prod(price, industry_demand, time_periods):
                                             model.isStandBy[i-1] * model.isIdle[i] == 0 if i > 0 else pyomo.Constraint.Skip )    
  
  
-    # Status constraints and constraining max and min bid quantity 
-    model.maxPower_rule2 = pyomo.Constraint(model.i, rule=lambda model, i:
-                                            model.elecCons_MW[i] <= maxPower * (1- model.isStandBy[i]))
+    # # Status constraints and constraining max and min bid quantity 
+    # model.maxPower_rule2 = pyomo.Constraint(model.i, rule=lambda model, i:
+    #                                         model.elecCons_MW[i] <= maxPower * (1- model.isStandBy[i]))
 
-    model.minPower_rule2 = pyomo.Constraint(model.i, rule=lambda model, i:
-                                            model.elecCons_MW[i] >= minPower * (1-model.isStandBy[i]))  
+    # model.minPower_rule2 = pyomo.Constraint(model.i, rule=lambda model, i:
+    #                                         model.elecCons_MW[i] >= minPower * (1-model.isStandBy[i]))  
  
     def electrolyzerHotStarted(model, i):
         #machine can only be running if it was running in the prior period or started in this one
@@ -105,37 +104,20 @@ def optimizeH2Prod(price, industry_demand, time_periods):
             return model.isRunning[i] <= model.isRunning[i-1] + model.isHotStarted[i]
     model.electrolyzerHotStarted = pyomo.Constraint(model.i, rule=electrolyzerHotStarted)    
     
-
-    # def electrolyzerColdStartup(model, i):
-    #     #machine can only be running if it was running in the prior period or started in this one
-    #     if i < shutDownafterInactivity:
-    #         return pyomo.Constraint.Skip
-    #     else:
-    #         return   model.isIdle[i-1] - model.isIdle[i] <= model.isColdStarted[i]
-    # model.electrolyzerColdStartup = pyomo.Constraint(model.i, rule=electrolyzerColdStartup) 
-
-    # def electrolyzerColdStartup(model, i):
-    #     #machine can only be running if it was running in the prior period or started in this one
-    #     if i < shutDownafterInactivity:
-    #         return pyomo.Constraint.Skip
-    #     else:
-    #         return   model.isIdle[i-1] - model.isIdle[i] <= model.isColdStarted[i]
-
-    # model.electrolyzerColdStartup = pyomo.Constraint(model.i, rule=electrolyzerColdStartup) 
-    # def electrolyzerShutDown(model, i):
-    #     #machine can only be running if it was running in the prior period or started in this one
-    #     if i < shutDownafterInactivity:
-    #         return pyomo.Constraint.Skip
-    #     else:
-    #         return model.isIdle[i] >= model.isRunning[i]*shutDownafterInactivity - sum(model.isRunning[j] for j in range(i - shutDownafterInactivity + 1, i + 1)) 
-    # model.electrolyzerShutDown = pyomo.Constraint(model.i, rule=electrolyzerShutDown) 
-    
-    def electrolyzerShutDown_2(model, i):
+    def electrolyzerShutDown(model, i):
+        #machine can only be running if it was running in the prior period or started in this one
         if i < shutDownafterInactivity:
             return pyomo.Constraint.Skip
         else:
-            return model.isIdle[i] >= model.isStandBy[i-1] + sum(model.isStandBy[j] for j in range(i - shutDownafterInactivity, i + 1))/shutDownafterInactivity
-    model.electrolyzerShutDown_2 = pyomo.Constraint(model.i, rule=electrolyzerShutDown_2)              
+            return model.isIdle[i]*shutDownafterInactivity <= sum(1-model.isRunning[j] for j in range(i - shutDownafterInactivity, i + 1))
+    model.electrolyzerShutDown = pyomo.Constraint(model.i, rule=electrolyzerShutDown) 
+    
+    def electrolyzerColdStartup(model, i):
+        if i < shutDownafterInactivity:
+            return pyomo.Constraint.Skip
+        else:
+            return   model.isIdle[i-1] - model.isIdle[i] <= model.isColdStarted[i]
+    model.electrolyzerColdStartup = pyomo.Constraint(model.i, rule=electrolyzerColdStartup)     
     
     def minRuntime_rule(model, i):
         #force the minimum runtime after a start event
@@ -158,7 +140,7 @@ def optimizeH2Prod(price, industry_demand, time_periods):
                                             model.prodH2_kg[i] == model.elecToPlantUse_kg[i] + model.elecToStorage_kg[i]) 
     
     model.producedH2allocation_rule2 = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                             model.elecToPlantUse_kg[i] <= industry_demand[i])      
+                                            model.elecToPlantUse_kg[i] <= industry_demand[i])      
     
     model.producedH2allocation_rule3 = pyomo.Constraint(model.i, rule=lambda model, i: 
                                             model.storageToPlantUse_kg[i] == industry_demand[i] - model.elecToPlantUse_kg[i])  
