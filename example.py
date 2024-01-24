@@ -9,7 +9,7 @@ Created on Tue Apr 13 13:12:21 2021
 from flexABLE.flexABLE import World
 import pandas as pd
 
-scenarios = [(2016,3)] #,(2017,365),(2018,365),(2019,365)]
+scenarios = [(2016,7)] #,(2017,365),(2018,365),(2019,365)]
 
 importStorages = True
 importElectrolyzer = True
@@ -36,5 +36,4 @@ for year, days in scenarios:
                          importCRM = importCRM,
                          importCBT = importCBT,
                          meritOrder = meritOrder)
-    
     example.runSimulation()
