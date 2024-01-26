@@ -4,7 +4,7 @@ import pyomo.environ as pyomo
 from pyomo.opt import SolverFactory 
 
 #Electrolyzer Parameters
-maxPower = 300 #MW
+installedCapacity = 300 #MW
 minPower = 10 #[MW]
 effElec = 0.7 #average electrolyzer efficiency[%]
 pressElec = 30 #pressure of H2 at the end of electrolyzer [bar]
@@ -43,8 +43,8 @@ storageFlowOutput = 250 #kg/hr
 
 industrialDemandH2 = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Electrolyzer market participation/flexABLE_w_electrolyzer/input/2016/industrial_demand.csv')  #should be in kilos 
 PFC = pd.read_csv('/Users/kanankhasmammadov/Desktop/Thesis - Electrolyzer market participation/flexABLE_w_electrolyzer/input/2016/PFC_run1.csv')
-industrialDemandH2 = industrialDemandH2[0:960]
-PFC = PFC[0:960]
+industrialDemandH2 = industrialDemandH2[0:1344]
+PFC = PFC[0:1344]
 
 # Convert DataFrame columns to lists 
 price = PFC['price'].tolist()
@@ -79,29 +79,33 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.obj = pyomo.Objective(expr=sum(price[i]*model.bidQuantity_MW[i]+ model.elecstartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
 
     # Status constraints and constraining max and min bid quantity 
+    #Max power boundary
     model.maxPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
-                                            model.elecCons_MW[i] <= maxPower * model.isRunning[i] + standbyCons*model.isStandBy[i] )
-
+                                            model.elecCons_MW[i] <= installedCapacity * model.isRunning[i] + standbyCons*model.isStandBy[i] )
+    #min power boundary
     model.minPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.elecCons_MW[i] >= minPower * model.isRunning[i]+ standbyCons*model.isStandBy[i])
-    
+    #only one operational mode
     model.statesExclusivity = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.isRunning[i] + model.isIdle[i] + model.isStandBy[i] == 1)
-
+    #transition from off to on state
     model.statesExclusivity_2 = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.isColdStarted[i] >= model.isRunning[i] - model.isRunning[i-1]- model.isStandBy[i-1] if i > 0 else pyomo.Constraint.Skip)
-
+    #first coldstartup not counted
     model.statesExclusivity_3 = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.isColdStarted[0] == 0 ) 
     
+    #transition from an off-state to a standby-state is not allowed    
     model.statesExclusivity_4 = pyomo.Constraint(model.i, rule=lambda model, i:
                                             model.isIdle[i-1] + model.isStandBy[i] <= 1 if i > 0 else pyomo.Constraint.Skip)     
+    #minimum runtime constraint
     def minRuntime_rule(model, i):
         #force the minimum runtime after a start event
         next_time_periods = {i + offset for offset in range(minRuntime) if i + offset < time_periods}
         return sum(model.isRunning[tt] + model.isStandBy[tt] for tt in next_time_periods) >= len(next_time_periods) * model.isColdStarted[i]
     model.minRuntime_rule = pyomo.Constraint(model.i, rule=minRuntime_rule)       
 
+    #minimum downtime constraint
     def minDownTime_rule(model, i):
         if i == 0:
             return pyomo.Constraint.Skip
@@ -109,11 +113,12 @@ def optimizeH2Prod(price, industry_demand, time_periods):
         return len(previous_time_periods) * model.isColdStarted[i] <= sum(model.isIdle[tt] for tt in previous_time_periods)
     model.minDownTime_rule = pyomo.Constraint(model.i, rule=minDownTime_rule)     
     
+    #maximum allowed cold startups within defined time period    
     model.maxColdStartup_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                         sum(model.isColdStarted[i] for i in range(0, time_periods)) <= maxAllowedColdStartups) 
 
     model.electrolyzerConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                        model.prodH2_kg[i] <= model.elecCons_MW[i]*0.25*effElec/energyContentH2_LHV) #(1-model.isStandBy[i])
+                                        model.prodH2_kg[i] == model.elecCons_MW[i]*0.25*effElec/energyContentH2_LHV ) #(1-model.isStandBy[i])
         
     model.hydrogenBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                             model.prodH2_kg[i] == model.elecToPlantUse_kg[i] + model.elecToStorage_kg[i])
@@ -133,6 +138,9 @@ def optimizeH2Prod(price, industry_demand, time_periods):
     model.standByConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                 model.elecStandByCons_MW[i] <= standbyCons*model.isStandBy[i])
 
+    model.standByConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                model.elecStandByCons_MW[i] >= standbyCons*model.isStandBy[i])
+    
     model.totalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                             model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i])
     
@@ -169,11 +177,11 @@ def optimizeH2Prod(price, industry_demand, time_periods):
 
 #set up user input variables
 desired_year = 2016 #will get from scenarios 
-optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
+optTimeframe = 'week' #input("Choose optimization timefrme, day or week : ")
 
 #adding timestamp to input data
-industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/10/{desired_year} 23:45', freq='15T')
-PFC['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/10/{desired_year} 23:45', freq='15T')
+industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/14/{desired_year} 23:45', freq='15T')
+PFC['Timestamp'] = pd.date_range(start=f'1/1/{desired_year}', end=f'1/14/{desired_year} 23:45', freq='15T')
 
 
 allBidQuantity = []
@@ -199,21 +207,24 @@ if optTimeframe == "week":
     for week in unique_weeks:
         # Extract data for the current week
         weeklyIntervalDemand = industrialDemandH2[industrialDemandH2['Week'] == week]
-        weeklyIntervalDemand = list(weeklyIntervalDemand['industry'])
+        weeklyIntervalDemand = list(weeklyIntervalDemand['Elec_x'])
         weeklyIntervalPFC = PFC[PFC['Week'] == week]
         weeklyIntervalPFC = list(weeklyIntervalPFC['price'])
         time_periods = len(weeklyIntervalPFC)  
-        optimalBidamount,elecCons,  comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods=time_periods)   
-        pyomo.timer.toc('Finished parameter sweep')
-        allBidQuantity.extend(optimalBidamount)
-        allelecCons.extend(elecCons)
-        allcomprCons.extend(comprCons)
-        allprodH2.extend(prodH2)
-        allelecToPlantUse_kg.extend(elecToPlantUse_kg)
-        allelecToStorage_kg.extend(elecToStorage_kg)
-        allstorageToPlantUse_kg.extend(storageToPlantUse_kg)
-        allCurrentSOC.extend(currentSOC)
-        all_isRunning.extend(isRunning) 
+        optimalBidamount,elecCons,elecStandByCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isIdle, isStandBy, isColdStarted = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods=time_periods)   
+        allBidQuantity.extend([round(item, 3) for item in optimalBidamount])
+        allelecCons.extend([round(item, 3) for item in elecCons])
+        all_elecStandByCons.extend(elecStandByCons)        
+        allcomprCons.extend([round(item, 3) for item in comprCons])
+        allprodH2.extend([round(item, 3) for item in prodH2])
+        allelecToPlantUse_kg.extend([round(item, 3) for item in elecToPlantUse_kg])
+        allelecToStorage_kg.extend([round(item, 3) for item in elecToStorage_kg])
+        allstorageToPlantUse_kg.extend([round(item, 3) for item in storageToPlantUse_kg])
+        allCurrentSOC.extend([round(item, 3) for item in currentSOC])
+        all_isRunning.extend(isRunning)
+        all_isIdle.extend(isIdle), 
+        all_isStandBy.extend(isStandBy),        
+        all_isColdStarted.extend(isColdStarted) 
 elif optTimeframe == "day":
     # Use dt.date to get the date
     industrialDemandH2['Date'] = industrialDemandH2['Timestamp'].dt.date

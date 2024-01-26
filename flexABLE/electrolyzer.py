@@ -15,14 +15,14 @@ class Electrolyzer():
                  name = 'Elec_x',
                  technology = 'PEM',
                  minPower = 10, #[MW]
-                 maxPower = 100, #[MW] max power 
+                 installedCapacity = 100, #[MW] max power 
                  effElec = 0.7, #electrolyzer efficiency[%]
                  specEnerCons = 0.005, #System Specific energy consumption per m3 H2 [MWh/Nm3]                 
                  minDowntime = 0.5, #minimum standby time hours
                  minRuntime = 2, #hours
                  shutDownafterInactivity = 3, #[hr]after certain period of standby mode, Electrolyzer turns off 
-                 startUpCons = 0.52, #[MW] Startup consumotion of electrolyzer
-                 standbyCons = 0.2, #[MW] Stanby consumption of electrolyzer
+                 startUpCost = 50, # Euro per MW installed capacity
+                 standbyCons = 0.2, #[MW] Stanby consumption of electrolyzer 1% per installed capacity
                  maxAllowedColdStartups = 3000, #yearly allowed max cold startups
                  comprCons = 0.012,  #[MW]Compressor consumption 
                  maxSOC = 2000, #Kg 
@@ -36,6 +36,7 @@ class Electrolyzer():
         self.minDowntime /= self.world.dt          
         self.shutDownafterInactivity /= self.world.dt          
         
+        self.storageFlowOutput = 200 #*self.world.dt
         # bids status parameters
         self.dictCapacity = {n:0 for n in self.world.snapshots}
         self.dictCapacity[-1] = 0 #used to avoid key value in minimum downtime condition
@@ -92,7 +93,7 @@ class Electrolyzer():
             
             # for i in range(len(consecutive_zeros_start)):
             #     if consecutive_zeros_end[i] - consecutive_zeros_start[i] >= self.shutDownafterInactivity:
-            #         optimalBidAmount[consecutive_zeros_end[i]+1] += self.startUpCons
+            #         optimalBidAmount[consecutive_zeros_end[i]+1] += self.startUpCost
             
             bidQuantity_demand = optimization_results["bidQuantity"][t]             
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand) 
@@ -125,7 +126,7 @@ class Electrolyzer():
                 model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
                 model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
                 model.elecStandByCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-                model.elecStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
+                model.elecstartUpCost_EUR = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer startup consumption
                 model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
                 model.elecToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to process
@@ -137,7 +138,7 @@ class Electrolyzer():
                 model.isStarted = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
                 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] + model.elecstartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
 
                 #electrolyzer can only be running if it was running in the prior period or started in this one
                 def electrolyzerStarted(model, i): 
@@ -165,8 +166,8 @@ class Electrolyzer():
                                                     sum(model.isStarted[i] for i in range(0, time_periods)) <= maxAllowedColdStartups)     
                 
                 # Maximum power constraint of electrolyzer
-                model.maxPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
-                                                        model.elecCons_MW[i] <= self.maxPower * model.isRunning[i])
+                model.installedCapacity_rule = pyomo.Constraint(model.i, rule=lambda model, i:
+                                                        model.elecCons_MW[i] <= self.installedCapacity * model.isRunning[i])
                 # Minimum power constraint of electrolyzer
                 model.minPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
                                                         model.elecCons_MW[i] >= self.minPower * model.isRunning[i])                
@@ -180,14 +181,14 @@ class Electrolyzer():
                 model.demandBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                         industry_demand[i] == model.elecToPlantUse_kg[i] + model.storageToPlantUse_kg[i])                     
                 
-                model.elecStartupConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                            model.elecStartUpCons_MW[i] == self.startUpCons * model.isStarted[i])                    
+                model.elecstartUpCost_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                            model.elecstartUpCost_EUR[i] == self.startUpCost * model.isStarted[i])                    
                 
                 model.comprConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                             model.comprCons_MW[i] == model.elecToStorage_kg[i] * self.comprCons)
             
                 model.electricalBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i] + model.elecStartUpCons_MW[i]) 
+                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i]) 
                 # Define Storage constraint
                 model.currentSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i:
                                                     model.currentSOC_kg[i] == model.currentSOC_kg[i - 1] + model.elecToStorage_kg[i] - model.storageToPlantUse_kg[i]
@@ -196,10 +197,8 @@ class Electrolyzer():
                 model.maxSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                     model.currentSOC_kg[i] <= self.maxSOC)
                 
-                # Demand should be covered at each step 
-                model.demandCoverage_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                model.currentSOC_kg[i] >= model.storageToPlantUse_kg[i])
-                                    
+                model.storageFlowRate_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                        model.storageToPlantUse_kg[i] <= self.storageFlowOutput)  
                 # Solve the optimization problem
                 opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
                 result = opt.solve(model ) #tee=True
@@ -228,9 +227,9 @@ class Electrolyzer():
             PFC = pd.DataFrame(PFC, columns=['PFC']) 
             
             #set up timeframe for optimization
-            optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
+            optTimeframe = 'week' #input("Choose optimization timefrme, day or week : ")
             simulationYear = 2016 #please specify year
-            lastDay = 7 #please specify day
+            lastDay = 15 #please specify day
             
             start_of_year = datetime.datetime(year=simulationYear, month=1, day=1)
             date = start_of_year + datetime.timedelta(days=lastDay - 1)
@@ -260,7 +259,7 @@ class Electrolyzer():
                 for week in unique_weeks:
                     # Extract weekly data for the current week
                     weeklyIntervalDemand = industrialDemandH2[industrialDemandH2['Week'] == week]
-                    weeklyIntervalDemand = list(weeklyIntervalDemand['industry'])
+                    weeklyIntervalDemand = list(weeklyIntervalDemand[self.name])
                     weeklyIntervalPFC = PFC[PFC['Week'] == week]
                     weeklyIntervalPFC = list(weeklyIntervalPFC['PFC'])
                     time_periods = len(weeklyIntervalPFC) 
@@ -268,33 +267,33 @@ class Electrolyzer():
                     #Perform optimization for each week
                     optimalBidAmount,elecCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=weeklyIntervalPFC, industry_demand=weeklyIntervalDemand, time_periods = time_periods, maxAllowedColdStartups=maxAllowedColdStartups)
                     
-                    #calculating stanby time, Standby consumption added to first timestep 
-                    standbyCount = isRunning.count(0)
-                    elecStandByCons = self.standbyCons * standbyCount
-                    cheapest_time = dailyIntervalPFC.index(min(weeklyIntervalPFC))
-                    optimalBidAmount[cheapest_time] += elecStandByCons 
+                    # #calculating stanby time, Standby consumption added to first timestep 
+                    # standbyCount = isRunning.count(0)
+                    # elecStandByCons = self.standbyCons * standbyCount
+                    # cheapest_time = dailyIntervalPFC.index(min(weeklyIntervalPFC))
+                    # optimalBidAmount[cheapest_time] += elecStandByCons 
                     
-                    #startup consumption calculation
-                    #add startup consumption to first active timestep
-                    first_active_timestep = isRunning.index(1)
-                    optimalBidAmount[int(first_active_timestep)] += self.startUpCons
+                    # #startup consumption calculation
+                    # #add startup consumption to first active timestep
+                    # first_active_timestep = isRunning.index(1)
+                    # optimalBidAmount[int(first_active_timestep)] += self.startUpCost
 
-                    isRunning_np = np.array(isRunning)
-                    isRunning_diff = np.diff(isRunning_np)
-                    isRunning_diff = np.append(isRunning_diff, 0)  # Add 0 at the end to match the length of isRunning
+                    # isRunning_np = np.array(isRunning)
+                    # isRunning_diff = np.diff(isRunning_np)
+                    # isRunning_diff = np.append(isRunning_diff, 0)  # Add 0 at the end to match the length of isRunning
 
-                    #adding startup consumption for consequetive inactivity time
-                    consecutive_zeros_start = list(np.where(isRunning_diff == -1)[0])
-                    consecutive_zeros_end = list(np.where(isRunning_diff == 1)[0])
-                    #adjust length of the lists
-                    if len(consecutive_zeros_start) > len(consecutive_zeros_end):
-                        consecutive_zeros_start.pop(-1)
-                    elif  len(consecutive_zeros_start) < len(consecutive_zeros_end):
-                        consecutive_zeros_end.pop(-1)
-                    #if inactivity is more than treshold, startupConsumption added to next time when electrolyzer becomes online
-                    for i in range(len(consecutive_zeros_start)):
-                        if consecutive_zeros_end[i] - consecutive_zeros_start[i] >= self.shutDownafterInactivity:
-                            optimalBidAmount[consecutive_zeros_end[i]+1] += self.startUpCons
+                    # #adding startup consumption for consequetive inactivity time
+                    # consecutive_zeros_start = list(np.where(isRunning_diff == -1)[0])
+                    # consecutive_zeros_end = list(np.where(isRunning_diff == 1)[0])
+                    # #adjust length of the lists
+                    # if len(consecutive_zeros_start) > len(consecutive_zeros_end):
+                    #     consecutive_zeros_start.pop(-1)
+                    # elif  len(consecutive_zeros_start) < len(consecutive_zeros_end):
+                    #     consecutive_zeros_end.pop(-1)
+                    # #if inactivity is more than treshold, startUpCost added to next time when electrolyzer becomes online
+                    # for i in range(len(consecutive_zeros_start)):
+                    #     if consecutive_zeros_end[i] - consecutive_zeros_start[i] >= self.shutDownafterInactivity:
+                    #         optimalBidAmount[consecutive_zeros_end[i]+1] += self.startUpCost
                     
                     #output results
                     optimalBidAmount_all.extend(optimalBidAmount)                    
@@ -335,7 +334,7 @@ class Electrolyzer():
                     # #startup consumption calculation
                     # #add startup consumption to first active timestep
                     # first_active_timestep = isRunning.index(1)
-                    # optimalBidAmount[int(first_active_timestep)] += self.startUpCons
+                    # optimalBidAmount[int(first_active_timestep)] += self.startUpCost
 
                     # isRunning_np = np.array(isRunning)
                     # isRunning_diff = np.diff(isRunning_np)
@@ -349,10 +348,10 @@ class Electrolyzer():
                     #     consecutive_zeros_start.pop(-1)
                     # elif  len(consecutive_zeros_start) < len(consecutive_zeros_end):
                     #     consecutive_zeros_end.pop(-1)
-                    # #if inactivity is more than treshold, startupConsumption added to next time when electrolyzer becomes online
+                    # #if inactivity is more than treshold, startUpCostumption added to next time when electrolyzer becomes online
                     # for i in range(len(consecutive_zeros_start)):
                     #     if consecutive_zeros_end[i] - consecutive_zeros_start[i] >= self.shutDownafterInactivity:
-                    #         optimalBidAmount[consecutive_zeros_end[i]+1] += self.startUpCons
+                    #         optimalBidAmount[consecutive_zeros_end[i]+1] += self.startUpCost
 
                     #output results into CSV
                     optimalBidAmount_all.extend(optimalBidAmount)                    
@@ -381,7 +380,7 @@ class Electrolyzer():
                         'storage_to_plant_h2': storageToPlantUse_kg_all,
                         'SOC': currentSOC_all,
                         'isRunning': isRunning_all,
-                        'hotstart': isStarted_all,
+                        'inStarted': isStarted_all,
                         'PFC': PFC['PFC'],
                         'h2demand': industrialDemandH2[self.name]}
             df = pd.DataFrame(output)
