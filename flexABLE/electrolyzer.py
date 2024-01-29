@@ -17,32 +17,35 @@ class Electrolyzer():
                  minPower = 10, #[MW]
                  installedCapacity = 100, #[MW] max power 
                  effElec = 0.7, #electrolyzer efficiency[%]
-                 specEnerCons = 0.005, #System Specific energy consumption per m3 H2 [MWh/Nm3]                 
                  minDowntime = 0.5, #minimum standby time hours
                  minRuntime = 2, #hours
-                 shutDownafterInactivity = 3, #[hr]after certain period of standby mode, Electrolyzer turns off 
                  startUpCost = 50, # Euro per MW installed capacity
                  standbyCons = 0.2, #[MW] Stanby consumption of electrolyzer 1% per installed capacity
                  maxAllowedColdStartups = 3000, #yearly allowed max cold startups
                  comprCons = 0.012,  #[MW]Compressor consumption 
-                 maxSOC = 2000, #Kg 
+                 maxSOC = 2000, #Kg
+                 maxStorageOutput = 800, #[kg/hr] max flow output of hydrogen storage 
                  industry = 'Refining', 
                  world = None,
                  node = None,
                  **kwargs):
         
-        self.energyContentH2_LHV = 0.03333 #MWh/kg or lower heating value of H2
-        self.minRuntime /= self.world.dt
-        self.minDowntime /= self.world.dt          
-        self.shutDownafterInactivity /= self.world.dt          
         
-        self.storageFlowOutput = 200 #*self.world.dt
+        self.energyContentH2_LHV = 0.03333 #MWh/kg or lower heating value of H2
+        self.startUpCost *= self.installedCapacity
+        #adjusting hourly values for 15 min simulation interval
+        self.minRuntime /= self.world.dt
+        self.minDowntime /= self.world.dt 
+        # self.shutDownafterInactivity = 3, #[hr]after certain period of standby mode, Electrolyzer turns off
+        # self.shutDownafterInactivity /= self.world.dt          
+        self.maxStorageOutput *= self.world.dt #set 
+        
         # bids status parameters
         self.dictCapacity = {n:0 for n in self.world.snapshots}
+        self.sentBids = []
+
         self.dictCapacity[-1] = 0 #used to avoid key value in minimum downtime condition
         
-        # Unit status parameters
-        self.sentBids = []
         
     #For the production of 1kg of hydrogen, about 9 kg of water and 60kWh of electricity are consumed(Rievaj, V., Gaňa, J., & Synák, F. (2019). Is hydrogen the fuel of the future?)
     def step(self): 
@@ -125,7 +128,6 @@ class Electrolyzer():
                 model.bidQuantity_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals)
                 model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
                 model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-                model.elecStandByCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
                 model.elecstartUpCost_EUR = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer startup consumption
                 model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
@@ -198,7 +200,7 @@ class Electrolyzer():
                                                     model.currentSOC_kg[i] <= self.maxSOC)
                 
                 model.storageFlowRate_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                        model.storageToPlantUse_kg[i] <= self.storageFlowOutput)  
+                                        model.storageToPlantUse_kg[i] <= self.maxStorageOutput)  
                 # Solve the optimization problem
                 opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
                 result = opt.solve(model ) #tee=True
@@ -209,7 +211,6 @@ class Electrolyzer():
                 # Retrieve the optimal values
                 optimalBidAmount = [model.bidQuantity_MW[i].value for i in model.i]
                 elecCons = [model.elecCons_MW[i].value for i in model.i]            
-                elecStandByCons = [model.elecStandByCons_MW[i].value for i in model.i]           
                 comprCons = [model.comprCons_MW[i].value for i in model.i]
                 prodH2 = [ model.prodH2_kg[i].value for i in model.i]           
                 elecToPlantUse_kg = [ model.elecToPlantUse_kg[i].value for i in model.i]            
@@ -223,11 +224,15 @@ class Electrolyzer():
             #setup optimization input data from flexable
             industrialDemandH2 = self.world.industrial_demand[self.name]
             industrialDemandH2 = pd.DataFrame(industrialDemandH2, columns=[self.name])
+            print(industrialDemandH2, 'industrialDemandH2')
+            
             PFC = [round(p, 2) for p in self.world.PFC]
-            PFC = pd.DataFrame(PFC, columns=['PFC']) 
+            PFC = pd.DataFrame(PFC, columns=['PFC'])
+            print(PFC, 'PFC')
+ 
             
             #set up timeframe for optimization
-            optTimeframe = 'week' #input("Choose optimization timefrme, day or week : ")
+            optTimeframe = 'year' #input("Choose optimization timefrme, day or week : ")
             simulationYear = 2016 #please specify year
             lastDay = 15 #please specify day
             
@@ -248,8 +253,58 @@ class Electrolyzer():
             currentSOC_all = []
             isRunning_all = []
             isStarted_all = []
-            
+
             #setting optimization timeframe and calling optimization function
+            if optTimeframe == "year":
+                print('INFO: Optimization is being performed for entire time period')
+                time_periods = len(PFC) 
+                maxAllowedColdStartups = self.maxAllowedColdStartups
+                demand = list(industrialDemandH2[self.name])
+                price = list(PFC['PFC'])
+
+                #Perform optimization for entire time period
+                optimalBidAmount,elecCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=price, industry_demand=demand, time_periods = time_periods, maxAllowedColdStartups=maxAllowedColdStartups)
+                #output results
+                optimalBidAmount_all.extend(optimalBidAmount)                    
+                elecCons_all.extend(elecCons)
+                comprCons_all.extend(comprCons)
+                prodH2_all.extend(prodH2)
+                elecToPlantUse_kg_all.extend(elecToPlantUse_kg)
+                elecToStorage_kg_all.extend(elecToStorage_kg)
+                storageToPlantUse_kg_all.extend(storageToPlantUse_kg)
+                currentSOC_all.extend(currentSOC)
+                isRunning_all.extend(isRunning)
+                isStarted_all.extend(isStarted)            
+
+            if optTimeframe == "month":
+                print('INFO: Monthly optimization is being performed')
+                # find weeks from timestamp
+                industrialDemandH2['Month'] = industrialDemandH2['Timestamp'].dt.month
+                PFC['Month'] = PFC['Timestamp'].dt.month
+                unique_month = industrialDemandH2['Month'].unique()
+                for month in unique_month:
+                    # Extract weekly data for the current month
+                    monthlyIntervalDemand = industrialDemandH2[industrialDemandH2['Month'] == month]
+                    monthlyIntervalDemand = list(monthlyIntervalDemand[self.name])
+                    monthlyIntervalPFC = PFC[PFC['Month'] == month]
+                    monthlyIntervalPFC = list(monthlyIntervalPFC['PFC'])
+                    time_periods = len(monthlyIntervalPFC) 
+                    maxAllowedColdStartups = self.maxAllowedColdStartups/12
+                    #Perform optimization for each week
+                    optimalBidAmount,elecCons, comprCons, prodH2, elecToPlantUse_kg, elecToStorage_kg, storageToPlantUse_kg, currentSOC, isRunning, isStarted = optimizeH2Prod(price=monthlyIntervalPFC, industry_demand=monthlyIntervalDemand, time_periods = time_periods, maxAllowedColdStartups=maxAllowedColdStartups)
+
+                    #output results
+                    optimalBidAmount_all.extend(optimalBidAmount)                    
+                    elecCons_all.extend(elecCons)
+                    comprCons_all.extend(comprCons)
+                    prodH2_all.extend(prodH2)
+                    elecToPlantUse_kg_all.extend(elecToPlantUse_kg)
+                    elecToStorage_kg_all.extend(elecToStorage_kg)
+                    storageToPlantUse_kg_all.extend(storageToPlantUse_kg)
+                    currentSOC_all.extend(currentSOC)
+                    isRunning_all.extend(isRunning)
+                    isStarted_all.extend(isStarted)
+
             if optTimeframe == "week":
                 print('INFO: Weekly optimization is being performed')
                 # find weeks from timestamp
