@@ -19,7 +19,8 @@ class Electrolyzer():
                  effElec = 0.7, #electrolyzer efficiency[%]
                  minDowntime = 0.5, #minimum standby time hours
                  minRuntime = 2, #hours
-                 startUpCost = 5000, # Euro per MW installed capacity
+                 hotStartupCons = 0.5, #MW 
+                 coldStartUpCons = 2, # Euro per MW installed capacity
                  maxAllowedColdStartups = 3000, #yearly allowed max cold startups
                  standbyCons = 1, #[MW] Stanby consumption of electrolyzer 1% per installed capacity
                  compEff = 0.75, # mechanical efficiency in %
@@ -39,7 +40,7 @@ class Electrolyzer():
         #adjusting hourly values for 15 min simulation interval
         self.minRuntime /= self.world.dt
         self.minDowntime /= self.world.dt
-        self.standbyCons *= self.world.dt 
+        self.coldStartUpCons *= self.world.dt 
         self.maxStorageOutput *= self.world.dt 
         
         # bids status parameters
@@ -103,7 +104,7 @@ class Electrolyzer():
                 model.bidQuantity_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals)
                 model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
                 model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-                model.elecstartUpCost_EUR = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer startup consumption
+                model.elecColdStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer cold startup consumption per kg
                 model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
                 model.elecToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to process
@@ -115,7 +116,7 @@ class Electrolyzer():
                 model.isStarted = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer started')
                 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] + model.elecstartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] for i in model.i), sense=pyomo.minimize)
 
                 #electrolyzer can only be running if it was running in the prior period or started in this one
                 def electrolyzerStarted(model, i): 
@@ -158,14 +159,14 @@ class Electrolyzer():
                 model.demandBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                         industry_demand[i] == model.elecToPlantUse_kg[i] + model.storageToPlantUse_kg[i])                     
                 
-                model.elecstartUpCost_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                            model.elecstartUpCost_EUR[i] == self.startUpCost * model.isStarted[i])                    
+                model.elecstartUpCons_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                            model.elecColdStartUpCons_MW[i] == self.coldStartUpCons * model.isStarted[i])                    
                 
                 model.comprConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                             model.comprCons_MW[i] == model.elecToStorage_kg[i] * comprCons)
             
                 model.electricalBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i]) 
+                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i]+model.elecColdStartUpCons_MW[i]) 
                 # Define Storage constraint
                 model.currentSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i:
                                                     model.currentSOC_kg[i] == model.currentSOC_kg[i - 1] + model.elecToStorage_kg[i] - model.storageToPlantUse_kg[i]
