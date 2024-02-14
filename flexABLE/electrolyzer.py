@@ -51,7 +51,7 @@ class Electrolyzer():
 
     #For the production of 1kg of hydrogen, about 9 kg of water and 60kWh of electricity are consumed(Rievaj, V., Gaňa, J., & Synák, F. (2019). Is hydrogen the fuel of the future?)
     def step(self): 
-        self.dictCapacity[self.world.currstep] = 0 #It initializes the available capacity at the current time step to zero.
+        # self.dictCapacity[self.world.currstep] = 0 #It initializes the available capacity at the current time step to zero.
         for bid in self.sentBids: 
             if 'demandEOM' in bid.ID: #If the bid's ID contains the substring 'demandEOM', it increases the available capacity at the current time step
                 self.dictCapacity[self.world.currstep] = bid.confirmedAmount
