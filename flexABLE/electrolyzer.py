@@ -13,35 +13,30 @@ class Electrolyzer():
     def __init__(self,
                  agent=None,
                  name = 'Elec_x',
-                 technology = 'PEM',
-                 minPower = 10, #[MW]
-                 installedCapacity = 100, #[MW] max power 
-                 effElec = 0.7, #electrolyzer efficiency[%]
-                 minDowntime = 0.5, #minimum standby time hours
-                 minRuntime = 2, #hours
-                 hotStartupCons = 0.5, #MW 
-                 coldStartUpCons = 2, # Euro per MW installed capacity
-                 maxAllowedColdStartups = 3000, #yearly allowed max cold startups
-                 standbyCons = 1, #[MW] Stanby consumption of electrolyzer 1% per installed capacity
-                 compEff = 0.75, # mechanical efficiency in %
-                 compPressIn = 30, # inlet pressure in bar
-                 compPressOut = 300, # outlet pressure in bar
-                 compTempIn = 40, # inlet temperature in C
-                 maxSOC = 2000, #Kg
-                 maxStorageOutput = 800, #[kg/hr] max flow output of hydrogen storage 
-                 industry = 'Refining', 
-                 world = None,
-                 node = None,
+                technology = 'PEM',
+                minLoad = 0.1, #[%]
+                installedCapacity = 100, #[MW] max power 
+                effElec = 0.7, #electrolyzer efficiency[%]
+                minDowntime = 0.5, #minimum standby time hours
+                minRuntime = 1, #hours
+                coldStartUpCost = 50, # Euro per MW installed capacity
+                maxAllowedColdStartups = 3000, #yearly allowed max cold startups
+                standbyCons = 0.05, #% of installed capacity 
+                comprCons = 0.0012, #MWh/kg  compressor specific consumptin
+                maxSOC = 2000, #Kg
+                maxStorageOutput = 800, #[kg/hr] max flow output of hydrogen storage 
+                industry = 'Refining', 
+                world = None,
+                node = None,
                  **kwargs):
         
         self.energyContentH2_LHV = 0.03333 #MWh/kg or lower heating value of H2
         #adjusting hourly values for 15 min simulation interval
         self.minRuntime /= self.world.dt
         self.minDowntime /= self.world.dt     
-        self.standbyCons *= self.world.dt 
-        self.hotStartupCons *= self.world.dt 
-        self.coldStartUpCons *= self.world.dt 
-        
+        self.coldStartUpCost *= self.installedCapacity
+        self.minPower = self.installedCapacity * self.minLoad #[MW]
+        self.standbyCons *= self.installedCapacity 
         self.maxStorageOutput *= self.world.dt #set 
 
         # bids status parameters
@@ -86,15 +81,16 @@ class Electrolyzer():
             bidQuantity_demand = optimization_results["bidQuantity"][t]             
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand) 
         else:   
-            #calculate compressor consumption based on input values          
-            def compressorConsumtion(compEff, compPressIn, compPressOut, compTempIn):
-                gamma = 1.4 # adiabatic exponent
-                inlet_temperature = compTempIn + 273.15 # inlet temperature in K
-                R = 8.314 # universal gas constant in J/mol*K
-                M_H2_kg = 2.0159E-03 # molar mass of H2 in kg/mol
-                compCons = R * inlet_temperature / M_H2_kg * gamma / (gamma-1) * 1 / compEff * ((compPressOut/compPressIn)**((gamma-1)/gamma)-1) * 1E-06 / 3600 # compressor consumption in MWh/kg H2
-                return compCons
-            compCons = compressorConsumtion(compEff=self.compEff, compPressIn=self.compPressIn, compPressOut=self.compPressOut, compTempIn=self.compTempIn)*self.world.dt 
+            #calculate compressor consumption based on input values  
+            # # from Baumhof, M. T., Raheli, E., Johnsen, A. G., & Kazempour, J. (2023). Optimization of Hybrid Power Plants: When Is a Detailed Electrolyzer Model Necessary? https://doi.org/10.1109/PowerTech55446.2023.10202860        
+            # def compressorConsumtion(compEff, compPressIn, compPressOut, compTempIn):
+            #     gamma = 1.4 # adiabatic exponent
+            #     inlet_temperature = compTempIn + 273.15 # inlet temperature in K
+            #     R = 8.314 # universal gas constant in J/mol*K
+            #     M_H2_kg = 2.0159E-03 # molar mass of H2 in kg/mol
+            #     compCons = R * inlet_temperature / M_H2_kg * gamma / (gamma-1) * 1 / compEff * ((compPressOut/compPressIn)**((gamma-1)/gamma)-1) * 1E-06 / 3600 # compressor consumption in MWh/kg H2
+            #     return compCons
+            # compCons = compressorConsumtion(compEff=self.compEff, compPressIn=self.compPressIn, compPressOut=self.compPressOut, compTempIn=self.compTempIn) *self.world.dt 
 
             # Defining optimization function       
             def  optimizeH2Prod(price, industry_demand, time_periods, maxAllowedColdStartups):
@@ -106,8 +102,9 @@ class Electrolyzer():
                 model.prodH2_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #produced H2
                 model.elecCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
                 model.elecStandByCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-                model.elecColdStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer cold startup consumption per kg
-                model.elecHotStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer hot startup consumption per kg                model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
+                # model.elecColdStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer cold startup consumption per kg
+                model.elecColdStartUpCost_EUR = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
+                # model.elecHotStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer hot startup consumption per kg                model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
                 model.elecToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to process
@@ -122,7 +119,7 @@ class Electrolyzer():
                 model.isStandBy = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer isStandBy')
 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] + model.elecColdStartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
 
                 # Status constraints and constraining max and min bid quantity 
                 #Max power boundary
@@ -177,20 +174,23 @@ class Electrolyzer():
                 model.demandBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                         industry_demand[i] == model.elecToPlantUse_kg[i] + model.storageToPlantUse_kg[i])   
 
-                model.elecColdStartUp_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                            model.elecColdStartUpCons_MW[i] == self.coldStartUpCons * model.isColdStarted[i])
+                model.elecColdStartUpCost_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                                                            model.elecColdStartUpCost_EUR[i] == self.coldStartUpCost * model.isColdStarted[i])
+                
+                # model.elecColdStartUp_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                #                                             model.elecColdStartUpCons_MW[i] == self.coldStartUpCons * model.isColdStarted[i])
 
-                model.elecHotStartUp_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                            model.elecHotStartUpCons_MW[i] == self.hotStartupCons * model.isHotStarted[i])
+                # model.elecHotStartUp_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                #                                             model.elecHotStartUpCons_MW[i] == self.hotStartupCons * model.isHotStarted[i])
                 
                 model.compressorCons_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                            model.comprCons_MW[i] == model.elecToStorage_kg[i] * compCons)
+                                                            model.comprCons_MW[i] == model.elecToStorage_kg[i] * self.comprCons/self.world.dt)
 
                 model.standByConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                             model.elecStandByCons_MW[i] == self.standbyCons*model.isStandBy[i])
 
                 model.totalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] +  model.comprCons_MW[i]+ model.elecHotStartUpCons_MW[i]+model.elecColdStartUpCons_MW[i])
+                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] + model.comprCons_MW[i]) #model.elecColdStartUpCons_MW[i]) #+ model.elecHotStartUpCons_MW[i]
 
                 # Define Storage constraint
                 model.currentSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i:
