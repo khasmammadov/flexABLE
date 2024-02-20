@@ -235,20 +235,20 @@ class World():
             
             
             #write electrolyzer capacities
-            for powerplant in self.electrolyzers:
-                tempDF = pd.DataFrame(powerplant.dictCapacity, index=['Power'].drop([-1])).T.set_index(pd.date_range(self.startingDate,
+            for electrolyzer in self.electrolyzers:
+                tempDF = pd.DataFrame(electrolyzer.dictCapacity, index=['Power'].drop([-1])).T.set_index(pd.date_range(self.startingDate,
                                                                                                           periods = len(self.snapshots),
                                                                                                           freq = '15T')).astype('float64')
 
                 self.ResultsWriter.writeDataFrame(tempDF.clip(upper = 0), 'Power', tags = {'simulationID':self.simulationID,
-                                                                                           'UnitName':powerplant.name+'_charge',
+                                                                                           'UnitName':electrolyzer.name+'_charge',
                                                                                            'direction':'charge',
-                                                                                           'Technology':powerplant.technology})
+                                                                                           'Technology':electrolyzer.technology})
                 
-                self.ResultsWriter.writeDataFrame(tempDF.clip(lower=0),'Power', tags = {'simulationID':self.simulationID,
-                                                                                        'UnitName':powerplant.name+'_discharge',
-                                                                                        'direction':'discharge',
-                                                                                        'Technology':powerplant.technology})
+                # self.ResultsWriter.writeDataFrame(tempDF.clip(lower=0),'Power', tags = {'simulationID':self.simulationID,
+                #                                                                         'UnitName':powerplant.name+'_discharge',
+                #                                                                         'direction':'discharge',
+                #                                                                         'Technology':powerplant.technology})
             
             finished = datetime.now()
             logger.info('Writing results into database finished at: {}'.format(finished))

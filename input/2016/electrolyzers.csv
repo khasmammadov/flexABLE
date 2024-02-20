@@ -1,4 +1,3 @@
-﻿name,technology,minPower,installedCapacity,effElec,minDowntime,minRuntime,hotStartupCons,coldStartUpCons,maxAllowedColdStartups,standbyCons,compEff,compPressIn,compPressOut,compTempIn,comprCons,maxSOC,maxStorageOutput,company
-Elec_x,PEM,10,500,0.7,2,2,2.5,10,3000,5,0.75,30,300,40,0.0012,10000,800,Refining
-Elec_y,AEL,10,100,0.7,0.5,2,0.5,2,2000,1,0.75,30,300,40,0.0012,2000,800,Steel
-Elec_z,SOEL,10,500,0.7,0.5,4,2.5,10,4000,2,0.75,30,300,40,0.0012,15000,800,Ammonium
+﻿name,technology,minLoad,installedCapacity,effElec,minDowntime,minRuntime,coldStartUpCost,maxAllowedColdStartups,standbyCons,comprCons,maxSOC,company
+Elec_x,PEM,0.05,60,0.7,0.5,1,50,3000,0.0005,0.0012,22700,Refining
+Metal,PEM,0.05,190,0.7,0.5,1,50,4000,0.002,0.0012,5700,Metallurgy
