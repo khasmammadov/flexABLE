@@ -1,3 +1,2 @@
-﻿name,technology,minLoad,installedCapacity,effElec,minDowntime,minRuntime,coldStartUpCost,maxAllowedColdStartups,standbyCons,comprCons,maxSOC,company
-Elec_x,PEM,0.05,60,0.7,0.5,1,50,3000,0.0005,0.0012,22700,Refining
-Metal,PEM,0.05,190,0.7,0.5,1,50,4000,0.002,0.0012,5700,Metallurgy
+﻿name,technology,minLoad,maxLoad,installedCapacity,effElec,minDowntime,minRuntime,coldStartUpCost,maxAllowedColdStartups,standbyCons,comprCons,maxSOC,company
+Iron_steel,PEM,0.05,1.2,11850,0.63,0.5,1,50,3000,0.0005,0.0012,100000,Iron_steel

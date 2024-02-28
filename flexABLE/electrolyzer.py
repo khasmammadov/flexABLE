@@ -15,6 +15,7 @@ class Electrolyzer():
                 name = 'Elec_x',
                 technology = 'PEM',
                 minLoad = 0.1, #[%]
+                maxLoad = 1.2, #%
                 installedCapacity = 100, #[MW] installed capacity
                 effElec = 0.7, #electrolyzer efficiency[%]
                 minDowntime = 0.5, #minimum downtime
@@ -35,6 +36,7 @@ class Electrolyzer():
         self.minDowntime /= self.world.dt     
         self.coldStartUpCost *= self.installedCapacity
         self.minPower = self.installedCapacity * self.minLoad #[MW]
+        self.maxPower = self.installedCapacity * self.maxLoad
         self.standbyCons *= self.installedCapacity
         # self.maxStorageOutput = self.maxSOC*0.1*self.world.dt #10% of storage capacity
 
@@ -117,12 +119,12 @@ class Electrolyzer():
                 model.isStandBy = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer isStandBy')
 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(0.25*price[i] * model.bidQuantity_MW[i] + model.elecColdStartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(0.25* price[i] * model.bidQuantity_MW[i] + model.elecColdStartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
 
                 # Status constraints and constraining max and min bid quantity 
                 #Max power boundary
                 model.maxPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
-                                                        model.elecCons_MW[i] <= self.installedCapacity * model.isRunning[i] + self.standbyCons*model.isStandBy[i] )
+                                                        model.elecCons_MW[i] <= self.maxPower * model.isRunning[i] + self.standbyCons*model.isStandBy[i] )
                 #min power boundary
                 model.minPower_rule = pyomo.Constraint(model.i, rule=lambda model, i:
                                                         model.elecCons_MW[i] >= self.minPower * model.isRunning[i]+ self.standbyCons*model.isStandBy[i])
@@ -408,3 +410,5 @@ class Electrolyzer():
             bidQuantity_demand = bidQuantity_all[t]
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand)
         return bidsEOM
+
+

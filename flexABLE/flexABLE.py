@@ -245,10 +245,14 @@ class World():
                                                                                            'direction':'charge',
                                                                                            'Technology':electrolyzer.technology})
                 
-                # self.ResultsWriter.writeDataFrame(tempDF.clip(lower=0),'Power', tags = {'simulationID':self.simulationID,
-                #                                                                         'UnitName':powerplant.name+'_discharge',
-                #                                                                         'direction':'discharge',
-                #                                                                         'Technology':powerplant.technology})
+                # tempDF_CRM = pd.DataFrame(electrolyzer.dictCapacity_CRM, index=['Power']).T.set_index(pd.date_range(self.startingDate,
+                #                                                                                           periods = len(self.snapshots),
+                #                                                                                           freq = '15T')).astype('float64')
+
+                # self.ResultsWriter.writeDataFrame(tempDF_CRM.clip(upper = 0), 'Power', tags = {'simulationID':self.simulationID,
+                #                                                                            'UnitName':electrolyzer.name+'_charge',
+                #                                                                            'direction':'charge',
+                #                                                                            'Technology':electrolyzer.technology})
             
             finished = datetime.now()
             logger.info('Writing results into database finished at: {}'.format(finished))
@@ -293,10 +297,16 @@ class World():
             #write electrolyzer capacities as CSV
             for powerplant in self.electrolyzers:
                 tempDF = pd.DataFrame(powerplant.dictCapacity, index=['Power']).T
-                tempDF = tempDF.drop([-1], axis = 0).set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
-                
+                tempDF = tempDF.drop([-1], axis = 0).set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')                
                 tempDF.to_csv(directory + '/Elec_capacities/{}_Capacity.csv'.format(powerplant.name))
-            
+
+                # tempDF_CRM = pd.DataFrame(powerplant.dictCapacity_CRM, index=['Power']).T
+                # tempDF_CRM = tempDF.set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
+                # tempDF_CRM.to_csv(directory + '/Elec_capacities/{}_Capacity_CRM.csv'.format(powerplant.name))            
+                
+                # tempDF_CRM_EOM_difference = pd.DataFrame(powerplant.CRM_EOM_difference, index=['Power']).T
+                # tempDF_CRM_EOM_difference= tempDF.set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
+                # tempDF_CRM_EOM_difference.to_csv(directory + '/Elec_capacities/{}_Capacity_CRM_EOM.csv'.format(powerplant.name))                    
             logger.info('Saving results complete')
             
             # for powerplant in self.powerplants:
