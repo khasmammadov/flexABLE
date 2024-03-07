@@ -19,7 +19,7 @@ class Electrolyzer():
                 installedCapacity = 100, #[MW] installed capacity
                 effElec = 0.7, #electrolyzer efficiency[%]
                 minDowntime = 0.5, #minimum downtime
-                minRuntime = 1, #hours
+                # minRuntime = 1, #hours, implemented as constraint but not used within this project
                 coldStartUpCost = 50, # Euro per MW installed capacity
                 maxAllowedColdStartups = 3000, #yearly allowed max cold startups
                 standbyCons = 0.05, #% of installed capacity 
@@ -32,7 +32,7 @@ class Electrolyzer():
         
         self.energyContentH2_LHV = 0.03333 #MWh/kg or lower heating value of H2
         #adjusting hourly values for 15 min simulation interval
-        self.minRuntime /= self.world.dt
+        # self.minRuntime /= self.world.dt
         self.minDowntime /= self.world.dt     
         self.coldStartUpCost *= self.installedCapacity
         self.minPower = self.installedCapacity * self.minLoad #[MW]
@@ -82,8 +82,9 @@ class Electrolyzer():
             bidQuantity_demand = optimization_results["bidQuantity"][t]             
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand) 
         else:   
-            #calculate compressor consumption based on input values  
-            # # from Baumhof, M. T., Raheli, E., Johnsen, A. G., & Kazempour, J. (2023). Optimization of Hybrid Power Plants: When Is a Detailed Electrolyzer Model Necessary? https://doi.org/10.1109/PowerTech55446.2023.10202860        
+            #calculate compressor consumption based on input values 
+            #whithin the scope of this project constant compressor consumption is used. To use following formula, please specify required variables in electrolyzers.csv input file
+            # from Baumhof, M. T., Raheli, E., Johnsen, A. G., & Kazempour, J. (2023). Optimization of Hybrid Power Plants: When Is a Detailed Electrolyzer Model Necessary? https://doi.org/10.1109/PowerTech55446.2023.10202860        
             # def compressorConsumtion(compEff, compPressIn, compPressOut, compTempIn):
             #     gamma = 1.4 # adiabatic exponent
             #     inlet_temperature = compTempIn + 273.15 # inlet temperature in K
@@ -105,7 +106,6 @@ class Electrolyzer():
                 model.elecStandByCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
                 # model.elecColdStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer cold startup consumption per kg
                 model.elecColdStartUpCost_EUR = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer consumption per kg
-                # model.elecHotStartUpCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #electrolyzer hot startup consumption per kg                model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.comprCons_MW = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #compressor consumption per kg
                 model.elecToStorage_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to storage
                 model.elecToPlantUse_kg = pyomo.Var(model.i, domain=pyomo.NonNegativeReals) #H2 from electrolyzer to process
@@ -119,7 +119,7 @@ class Electrolyzer():
                 model.isStandBy = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer isStandBy')
 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(0.25* price[i] * model.bidQuantity_MW[i] + model.elecColdStartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i]*self.world.dt  + model.elecColdStartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
 
                 # Status constraints and constraining max and min bid quantity 
                 #Max power boundary
@@ -134,21 +134,19 @@ class Electrolyzer():
                 #transition from off to on state
                 model.statesExclusivity_2 = pyomo.Constraint(model.i, rule=lambda model, i:
                                                         model.isColdStarted[i] >= model.isRunning[i] - model.isRunning[i-1]- model.isStandBy[i-1] if i > 0 else pyomo.Constraint.Skip)
-                # # first coldstartup not counted
-                # model.statesExclusivity_3 = pyomo.Constraint(model.i, rule=lambda model, i:
-                #                                         model.isColdStarted[0] == 0 ) 
-                #transition from an off-state to a standby-state is not allowed    
+                # first coldstartup not counted
+                model.statesExclusivity_3 = pyomo.Constraint(model.i, rule=lambda model, i:
+                                                        model.isColdStarted[0] == 1 ) 
+                
+                # transition from an off-state to a standby-state is not allowed    
                 model.statesExclusivity_4 = pyomo.Constraint(model.i, rule=lambda model, i:
                                                         model.isIdle[i-1] + model.isStandBy[i] <= 1 if i > 0 else pyomo.Constraint.Skip)     
-                # #sepcify hot startup timestep
-                # model.statesExclusivity_5 = pyomo.Constraint(model.i, rule=lambda model, i:
-                #                             model.isStandBy[i-1] <= model.isStandBy[i] + model.isHotStarted[i] if i > 0 else pyomo.Constraint.Skip)  
                 #minimum runtime constraint
-                def minRuntime_rule(model, i):
-                    #force the minimum runtime after a start event
-                    next_time_periods = {i + offset for offset in range(int(self.minRuntime)) if i + offset < time_periods}
-                    return sum(model.isRunning[tt] + model.isStandBy[tt] for tt in next_time_periods) >= len(next_time_periods) * model.isColdStarted[i]
-                model.minRuntime_rule = pyomo.Constraint(model.i, rule=minRuntime_rule)       
+                # def minRuntime_rule(model, i):
+                #     #force the minimum runtime after a start event
+                #     next_time_periods = {i + offset for offset in range(int(self.minRuntime)) if i + offset < time_periods}
+                #     return sum(model.isRunning[tt] + model.isStandBy[tt] for tt in next_time_periods) >= len(next_time_periods) * model.isColdStarted[i]
+                # model.minRuntime_rule = pyomo.Constraint(model.i, rule=minRuntime_rule)       
                 
                 #minimum downtime constraint
                 def minDownTime_rule(model, i):
@@ -163,7 +161,7 @@ class Electrolyzer():
                                                     sum(model.isColdStarted[i] for i in range(0, time_periods)) <= maxAllowedColdStartups) 
 
                 model.electrolyzerConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                    model.prodH2_kg[i] == model.elecCons_MW[i]*0.25*self.effElec/self.energyContentH2_LHV*(1-model.isStandBy[i]) )
+                                                    model.prodH2_kg[i] == model.elecCons_MW[i]*self.world.dt*self.effElec/self.energyContentH2_LHV*(1-model.isStandBy[i]) )
 
                 model.hydrogenBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                         model.prodH2_kg[i] == model.elecToPlantUse_kg[i] + model.elecToStorage_kg[i])
@@ -185,7 +183,7 @@ class Electrolyzer():
                                                             model.elecStandByCons_MW[i] == self.standbyCons*model.isStandBy[i])
 
                 model.totalConsumption_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] + model.comprCons_MW[i]) #model.elecColdStartUpCons_MW[i]) #+ model.elecHotStartUpCons_MW[i]
+                                                        model.bidQuantity_MW[i] == model.elecCons_MW[i] + model.comprCons_MW[i]) #model.elecColdStartUpCons_MW[i]) 
 
                 # Define Storage constraint
                 model.currentSOC_rule = pyomo.Constraint(model.i, rule=lambda model, i:
@@ -227,9 +225,9 @@ class Electrolyzer():
             PFC = pd.DataFrame(PFC, columns=['PFC'])
 
             #set up timeframe for optimization #TODO
-            optTimeframe = 'day' #input("Choose optimization timefrme, day or week : ")
-            simulationYear = 2016 #please specify year
-            lastDay = 15 #please specify day
+            optTimeframe = input("Choose optimization timefrme, day or week : ")
+            simulationYear = 2019 #please specify year
+            lastDay = 10 #please specify day
             start_of_year = datetime.datetime(year=simulationYear, month=1, day=1)
             date = start_of_year + datetime.timedelta(days=lastDay - 1)
             lastMonth = date.month
@@ -263,7 +261,8 @@ class Electrolyzer():
                     currentSOC, isRunning, isStandBy, isIdle, isColdStarted = optimizeH2Prod(price=price, 
                                                                                             industry_demand=demand, 
                                                                                             time_periods = time_periods, 
-                                                                                            maxAllowedColdStartups=maxAllowedColdStartups)
+                                                                                            maxAllowedColdStartups=maxAllowedColdStartups)     
+                #output results
                 bidQuantity_all.extend(optimalBidamount)                    
                 elecCons_all.extend(elecCons)
                 elecStandByCons_all.extend(elecStandByCons)        
@@ -276,8 +275,8 @@ class Electrolyzer():
                 isRunning_all.extend(isRunning)
                 isStandBy_all.extend(isStandBy)            
                 isIdle_all.extend(isIdle)            
-                isColdStarted_all.extend(isColdStarted)            
-
+                isColdStarted_all.extend(isColdStarted)   
+                
             if optTimeframe == "month":
                 print('INFO: Monthly optimization is being performed')
                 # find weeks from timestamp
@@ -298,7 +297,7 @@ class Electrolyzer():
                                                                                                 industry_demand=monthlyIntervalDemand, 
                                                                                                 time_periods = time_periods, 
                                                                                                 maxAllowedColdStartups=maxAllowedColdStartups)
-                    #output results
+                                        #output results
                     bidQuantity_all.extend(optimalBidamount)                    
                     elecCons_all.extend(elecCons)
                     elecStandByCons_all.extend(elecStandByCons)        
@@ -310,8 +309,9 @@ class Electrolyzer():
                     currentSOC_all.extend(currentSOC)
                     isRunning_all.extend(isRunning)
                     isStandBy_all.extend(isStandBy)            
-                    isColdStarted_all.extend(isColdStarted)  
-
+                    isIdle_all.extend(isIdle)            
+                    isColdStarted_all.extend(isColdStarted)   
+                    
             if optTimeframe == "week":
                 print('INFO: Weekly optimization is being performed')
                 # find weeks from timestamp
@@ -332,8 +332,7 @@ class Electrolyzer():
                                                                                                 industry_demand=weeklyIntervalDemand, 
                                                                                                 time_periods = time_periods, 
                                                                                                 maxAllowedColdStartups=maxAllowedColdStartups)
-                    
-                    #output results
+                                        #output results
                     bidQuantity_all.extend(optimalBidamount)                    
                     elecCons_all.extend(elecCons)
                     elecStandByCons_all.extend(elecStandByCons)        
@@ -347,7 +346,6 @@ class Electrolyzer():
                     isStandBy_all.extend(isStandBy)            
                     isIdle_all.extend(isIdle)            
                     isColdStarted_all.extend(isColdStarted)   
-
             elif optTimeframe == "day":
                 print('INFO: Daily optimization is being performed')
                 # find days from timestamp
@@ -384,7 +382,7 @@ class Electrolyzer():
                     isIdle_all.extend(isIdle)            
                     isColdStarted_all.extend(isColdStarted)    
             
-        #exporting optimization results, happens one time then code uses exported csv file for the rest of the simulation
+            #exporting optimization results, happens one time then code uses exported csv file for the rest of the simulation
             directory = 'output/{}/Elec_capacities'.format(self.world.scenario)
             if not os.path.exists(directory):
                 os.makedirs(directory)

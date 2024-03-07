@@ -244,15 +244,6 @@ class World():
                                                                                            'UnitName':electrolyzer.name+'_charge',
                                                                                            'direction':'charge',
                                                                                            'Technology':electrolyzer.technology})
-                
-                # tempDF_CRM = pd.DataFrame(electrolyzer.dictCapacity_CRM, index=['Power']).T.set_index(pd.date_range(self.startingDate,
-                #                                                                                           periods = len(self.snapshots),
-                #                                                                                           freq = '15T')).astype('float64')
-
-                # self.ResultsWriter.writeDataFrame(tempDF_CRM.clip(upper = 0), 'Power', tags = {'simulationID':self.simulationID,
-                #                                                                            'UnitName':electrolyzer.name+'_charge',
-                #                                                                            'direction':'charge',
-                #                                                                            'Technology':electrolyzer.technology})
             
             finished = datetime.now()
             logger.info('Writing results into database finished at: {}'.format(finished))
@@ -264,8 +255,11 @@ class World():
             directory = 'output/{}/'.format(self.scenario)
             if not os.path.exists(directory):
                 os.makedirs(directory)
+            if not os.path.exists(directory+'/PP_capacities'):
                 os.makedirs(directory+'/PP_capacities')
+            if not os.path.exists(directory+'/STO_capacities'):
                 os.makedirs(directory+'/STO_capacities')
+            if not os.path.exists(directory+'/Elec_capacities'):
                 os.makedirs(directory+'/Elec_capacities')
 
                 
@@ -298,19 +292,10 @@ class World():
             for powerplant in self.electrolyzers:
                 tempDF = pd.DataFrame(powerplant.dictCapacity, index=['Power']).T
                 tempDF = tempDF.drop([-1], axis = 0).set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')                
-                tempDF.to_csv(directory + '/Elec_capacities/{}_Capacity.csv'.format(powerplant.name))
-
-                # tempDF_CRM = pd.DataFrame(powerplant.dictCapacity_CRM, index=['Power']).T
-                # tempDF_CRM = tempDF.set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
-                # tempDF_CRM.to_csv(directory + '/Elec_capacities/{}_Capacity_CRM.csv'.format(powerplant.name))            
                 
-                # tempDF_CRM_EOM_difference = pd.DataFrame(powerplant.CRM_EOM_difference, index=['Power']).T
-                # tempDF_CRM_EOM_difference= tempDF.set_index(pd.date_range(self.startingDate, periods=len(self.snapshots), freq='15T')).astype('float64')
-                # tempDF_CRM_EOM_difference.to_csv(directory + '/Elec_capacities/{}_Capacity_CRM_EOM.csv'.format(powerplant.name))                    
-            logger.info('Saving results complete')
+                tempDF.to_csv(directory + '/Elec_capacities/{}_Capacity.csv'.format(powerplant.name))                 
             
-            # for powerplant in self.powerplants:
-            #     tempDF.to_csv(directory + 'PP_capacities/{}_Capacity.csv'.format(powerplant.name))
+            logger.info('Saving results complete')
             
         logger.info("#########################")
         
@@ -463,7 +448,12 @@ class World():
         demand.drop(demand.index[0:startingPoint], inplace = True)
         demand.reset_index(drop = True, inplace = True)
         
-
+        demand_for_PFC = pd.read_csv('input/{}/IED_DE_for_PFC.csv'.format(scenario),
+                             nrows  =len(self.snapshots) + startingPoint,
+                             index_col = 0)
+        demand_for_PFC.drop(demand.index[0:startingPoint], inplace = True)
+        demand_for_PFC.reset_index(drop = True, inplace = True)
+        
         if importCBT:
             CBT = pd.read_csv('input/{}/CBT_DE.csv'.format(scenario),
                               nrows = len(self.snapshots) + startingPoint,
@@ -524,7 +514,7 @@ class World():
         if meritOrder:
             logger.info("Calculating PFC....")
             
-            meritOrder = MeritOrder.MeritOrder(demand,
+            meritOrder = MeritOrder.MeritOrder(demand_for_PFC,
                                                powerplantsList,
                                                vrepowerplantFeedIn,
                                                self.fuelPrices,
@@ -535,7 +525,7 @@ class World():
             PFC_export = list([round(p, 2) for p in self.PFC])
             data = {'PFC': PFC_export}
             df = pd.DataFrame(data)
-            df.to_csv('output/PFC_export.csv', index=False)
+            df.to_csv('output/PFC_export.csv', index=True)
             logger.info("Merit Order calculated.")
             
             
