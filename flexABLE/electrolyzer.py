@@ -119,7 +119,7 @@ class Electrolyzer():
                 model.isStandBy = pyomo.Var(model.i, domain=pyomo.Binary, doc='Electrolyzer isStandBy')
 
                 # Define the objective function - minimize cost sum within selected timeframe
-                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i]*self.world.dt  + model.elecColdStartUpCost_EUR[i] for i in model.i), sense=pyomo.minimize)
+                model.obj = pyomo.Objective(expr=sum(price[i] * model.bidQuantity_MW[i] * self.world.dt  + self.coldStartUpCost * model.isColdStarted[i] for i in model.i), sense=pyomo.minimize)
 
                 # Status constraints and constraining max and min bid quantity 
                 #Max power boundary
@@ -136,7 +136,7 @@ class Electrolyzer():
                                                         model.isColdStarted[i] >= model.isRunning[i] - model.isRunning[i-1]- model.isStandBy[i-1] if i > 0 else pyomo.Constraint.Skip)
                 # first coldstartup not counted
                 model.statesExclusivity_3 = pyomo.Constraint(model.i, rule=lambda model, i:
-                                                        model.isColdStarted[0] == 1 ) 
+                                                        model.isColdStarted[0] == 0 ) 
                 
                 # transition from an off-state to a standby-state is not allowed    
                 model.statesExclusivity_4 = pyomo.Constraint(model.i, rule=lambda model, i:
@@ -170,8 +170,8 @@ class Electrolyzer():
                 model.demandBalance_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                                                         industry_demand[i] == model.elecToPlantUse_kg[i] + model.storageToPlantUse_kg[i])   
 
-                model.elecColdStartUpCost_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
-                                                            model.elecColdStartUpCost_EUR[i] == self.coldStartUpCost * model.isColdStarted[i])
+                # model.elecColdStartUpCost_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
+                #                                             model.elecColdStartUpCost_EUR[i] == self.coldStartUpCost * model.isColdStarted[i])
                 
                 # model.elecColdStartUp_rule = pyomo.Constraint(model.i, rule=lambda model, i: 
                 #                                             model.elecColdStartUpCons_MW[i] == self.coldStartUpCons * model.isColdStarted[i])
