@@ -81,6 +81,7 @@ class Electrolyzer():
             optimization_results = pd.read_csv('output/{}/Elec_capacities/{}_optimizedBidAmount.csv'.format(self.world.scenario, self.name))
             bidQuantity_demand = optimization_results["bidQuantity"][t]             
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand) 
+            print(self.world.currstep, 'bidding from csv file')
         else:   
             #calculate compressor consumption based on input values 
             #whithin the scope of this project constant compressor consumption is used. To use following formula, please specify required variables in electrolyzers.csv input file
@@ -198,8 +199,8 @@ class Electrolyzer():
                 # Solve the optimization problem
                 opt = SolverFactory("gurobi")  # You can replace this with your preferred solver
                 result = opt.solve(model) #tee=True
-                print('INFO: Solver status:', result.solver.status)
-                print('INFO: Results: ', result.solver.termination_condition)
+                print('INFO: Electrolyzer Agent: Solver status:', result.solver.status)
+                print('INFO: Electrolyzer Agent: Results: ', result.solver.termination_condition)
 
                 # Retrieve the optimal values
                 optimalBidamount = [model.bidQuantity_MW[i].value for i in model.i]
@@ -221,16 +222,15 @@ class Electrolyzer():
             #setup optimization input data from flexable
             industrialDemandH2 = self.world.industrial_demand[self.name]
             industrialDemandH2 = pd.DataFrame(industrialDemandH2, columns=[self.name])            
-            PFC = [round(p, 2) for p in self.world.PFC]
+            #to acommodate negative values negative PFC is set to minimum positive number here 0.001
+            PFC = [max(0.001, round(p, 2)) for p in self.world.PFC]
             PFC = pd.DataFrame(PFC, columns=['PFC'])
 
             #set up timeframe for optimization #TODO
-            optTimeframe = input("Choose optimization timefrme, day or week : ")
-            simulationYear = 2019 #please specify year
-            lastDay = 10 #please specify day
-            start_of_year = datetime.datetime(year=simulationYear, month=1, day=1)
-            date = start_of_year + datetime.timedelta(days=lastDay - 1)
-            lastMonth = date.month
+            optTimeframe = 'day' # input("Choose optimization timefrme, day or week : ")
+            simulationYear = 2030 #please specify year
+            lastDay = 31 #please specify last day
+            lastMonth = 12 #please specify last month
             industrialDemandH2['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')            
             PFC['Timestamp'] = pd.date_range(start=f'1/1/{simulationYear}', end=f'{lastMonth}/{lastDay}/{simulationYear} 23:45', freq='15T')
 
@@ -404,6 +404,7 @@ class Electrolyzer():
                         'h2demand': industrialDemandH2[self.name]}
             df = pd.DataFrame(output)
             df.to_csv( directory + '/{}_optimizedBidAmount.csv'.format(self.name), index=True)
+            # print('INFO: Electrolyzer Agent: Optimization for a period completed, continuing with next timeframe')
             #save results into bid requests
             bidQuantity_demand = bidQuantity_all[t]
             bidsEOM = self.collectBidsEOM(t, bidsEOM, bidQuantity_demand)

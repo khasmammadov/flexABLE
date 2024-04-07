@@ -1,0 +1,5 @@
+﻿name,technology,minLoad,maxLoad,installedCapacity,effElec,minDowntime,minRuntime,coldStartUpCost,maxAllowedColdStartups,standbyCons,comprCons,maxSOC,company
+Iron_steel,PEM,0.05,1.2,2638,0.63,0.5,1,50,250,0.02,0.0012,616500,Iron_steel
+Olefin,PEM,0.05,1.2,2233,0.63,0.5,1,50,250,0.02,0.0012,532850,Olefin
+Methanol,PEM,0.05,1.2,139,0.63,0.5,1,50,250,0.02,0.0012,33100,Methanol
+Ammonia,PEM,0.05,1.2,212,0.63,0.5,1,50,250,0.02,0.0012,50500,Ammonia

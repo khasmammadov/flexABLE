@@ -263,9 +263,11 @@ class CRM():
                     # Confirmed demand is greater than confirmed supply
                     elif confQty_demand > confQty_supply:
                         confirmedBidsDemand[-1].partialConfirm(confirmedBidsDemand[-1].amount - (confQty_demand - confQty_supply))
+                        print(confirmedBidsDemand[-1], self.world.currstep, 'confirmedBidsDemand[-1]')
                         confirmedBidsDemand[-1][1] -= (confQty_demand - confQty_supply)
+                        print(confirmedBidsDemand[-1][1], self.world.currstep, 'confirmedBidsDemand[-1][1]')
                         break
-    
+                        
                     # Confirmed supply and confirmed demand are equal
                     else:
                         break

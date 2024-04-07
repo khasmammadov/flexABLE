@@ -411,7 +411,7 @@ class World():
             #import industrial H2 demand
             industrial_demand = pd.read_csv('input/{}/industrial_demand.csv'.format(scenario),
                                 nrows = len(self.snapshots) + startingPoint,
-                                index_col = 0)
+                                )
             industrial_demand.drop(industrial_demand.index[0:startingPoint], inplace = True)
             industrial_demand.reset_index(drop = True, inplace = True)
             self.industrial_demand = industrial_demand            

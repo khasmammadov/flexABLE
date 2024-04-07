@@ -1,2 +1,0 @@
-﻿name,technology,minLoad,maxLoad,installedCapacity,effElec,minDowntime,coldStartUpCost,maxAllowedColdStartups,standbyCons,comprCons,maxSOC,company
-Iron_steel,PEM,0.05,1.2,11850,0.63,0.5,50,3000,0.0005,0.0012,200000,Iron_steel

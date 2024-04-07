@@ -1,5 +1,5 @@
 ﻿name,technology,minLoad,maxLoad,installedCapacity,effElec,minDowntime,minRuntime,coldStartUpCost,maxAllowedColdStartups,standbyCons,comprCons,maxSOC,company
-Iron_steel,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,22700,Iron_steel
-Methanol,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,5700,Methanol
-Ammonia,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,5700,Ammonia
-Refineries,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,5700,Refineries
+Iron_steel,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,2128250,Iron_steel
+Olefin,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,6970950,Olefin
+Methanol,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,433300,Methanol
+Ammonia,PEM,0.05,1.2,100,0.63,0.5,1,50,250,0.05,0.0012,660850,Ammonia
